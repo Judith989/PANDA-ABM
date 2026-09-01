@@ -1,2 +1,2 @@
-# Panda
+# PANDA
 Smart Parking digital twin
