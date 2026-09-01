@@ -1,0 +1,6 @@
+mesa
+numpy
+pandas
+matplotlib
+networkx
+pytest
