@@ -30,6 +30,7 @@ Run:
 
 ```powershell
 python -m pytest tests -q
+```
 
 This basicalyy checks that the basic domain objects are working.
 
