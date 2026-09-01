@@ -10,9 +10,14 @@ The first version starts with a small synthetic parking environment so the model
 
 These first files define the basic objects used by the simulation.
 
-1 - Define driver states -- 'panda_abm/core/states.py'
-2 - Define parking space states -- 'panda_abm/environment/parking_space.py'
-3 - Generate Synthetic Parking Environment  'panda_abm/environment/facility.py'
+1. Define driver and parking-space state labels  
+   `panda_abm/core/states.py`
+
+2. Define parking-space data and parking-space state objects  
+   `panda_abm/environment/parking_space.py`
+
+3. Generate the first synthetic parking environment  
+   `panda_abm/environment/facility.py`
 
 At this stage, the synthetic environment is intentionally small. 
 It is used to test the simulation logic before loading the larger Walmart/PANDA lot with about 1315 parking spaces.
@@ -36,7 +41,7 @@ The next files define who the drivers are and how their behavior is parameterize
 
 Next - add driver parameters
 
-4 - Define behavioral parameters that holds utility weights  -- panda_abm/behavior/parameters.py
-5 -  Define CPT reference points for later M2 behavior -- panda_abm/behavior/references.py
-6 - Define driver attributes and population data structures panda_abm/behavior/population.py
-7 -  Create a reproducible driver population panda_abm/behavior/factory.py
+4. Define behavioral parameters that holds utility weights  --  `panda_abm/behavior/parameters.py`
+5.  Define CPT reference points for later M2 behavior -- `panda_abm/behavior/references.py`
+6. Define driver attributes and population data structures `panda_abm/behavior/population.py`
+7.  Create a reproducible driver population `panda_abm/behavior/factory.py`
