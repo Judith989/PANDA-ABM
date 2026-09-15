@@ -104,3 +104,30 @@ It tests that:
 7. The loaded lot config produces a valid facility object with real parking spaces.
 
 At this point, this test does not test driver movement, parking search, utility choice, event logging, or metrics yet. Those will come in later stages.
+
+## Step 3: Add Driver Perception And Choice Set Logic
+
+This step connects the driver behavior setup to the parking environment.
+
+9. Define driver perception  
+   `panda_abm/environment/perception.py`
+
+   This file determines which parking spaces a driver can see within a search radius. It also records whether each observed space is truly occupied and whether it appears available to the driver.
+
+10. Define the driver choice set  
+   `panda_abm/environment/choice_set.py`
+
+   This file filters the visible parking spaces into the spaces the driver is actually allowed to consider. The filters include availability, accessibility eligibility, reserved-space permits, vehicle compatibility, and walking-distance limits.
+
+After this step, the model can separate:
+
+- spaces that exist in the facility
+- spaces the driver can see
+- spaces the driver is allowed to choose from
+
+## Verify Step 3
+
+Run:
+
+```powershell
+python -m pytest tests -q
