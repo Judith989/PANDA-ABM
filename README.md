@@ -131,3 +131,39 @@ Run:
 
 ```powershell
 python -m pytest tests -q
+
+```
+
+## Step 4: Add Mesa Driver Agents And Parking Model
+
+This step turns the domain and decision logic into a working simulation.
+
+11. Define the driver agent  
+   `panda_abm/core/agent.py`
+
+   This file defines one driver in the parking simulation. The driver moves through states such as arriving, searching, targeting, parked, exiting, left, or abandoned.
+
+12. Define the parking model  
+   `panda_abm/core/model.py`
+
+   This file defines the Mesa model that holds the facility, driver population, parking-space states, decision model, and simulation clock.
+
+After this step, the project can run a basic parking simulation episode instead of only testing individual objects.
+
+The model should be able to:
+
+- create driver agents
+- advance simulation time
+- let drivers search for visible and feasible spaces
+- evaluate candidate spaces with the selected decision model
+- occupy a chosen parking space
+- stop when drivers have parked, left, or abandoned the search
+
+## Verify Step 4
+
+Run:
+
+```powershell
+python -m pytest tests -q
+```
+
