@@ -1,12 +1,23 @@
 # PANDA-ABM Research Simulation
+
 Author: Judith Njoku-Vowels
 
+This repository contains the research implementation of PANDA-ABM, a parking agent-based simulation built with Python and Mesa.
 
-This repository contains the research implementation of PANDA-ABM, a parking agent-based simulation built with Python and Mesa. 
 The first version starts with a small synthetic parking environment so the model logic can be tested clearly before moving to the full Walmart/PANDA parking lot and later Cesium integration.
 
+The current codebase supports:
 
-## Step 1: Build The Core Simulation Objects
+- synthetic parking facility experiments
+- Walmart/PANDA real lot experiments using `data/lot_config.json`
+- multiple driver personas
+- multiple decision models
+- event logging
+- metrics tables
+- plots
+- JSON exports for future digital twin and Cesium use
+
+## Step 1: Core States And Parking Spaces
 
 These first files define the basic objects used by the simulation.
 
@@ -19,30 +30,16 @@ These first files define the basic objects used by the simulation.
 3. Generate the first synthetic parking environment  
    `panda_abm/environment/facility.py`
 
-At this stage, the synthetic environment is intentionally small. 
-It is used to test the simulation logic before loading the larger Walmart/PANDA lot with about 1315 parking spaces.
+At this stage, the synthetic environment is intentionally small. It is used to test the simulation logic before loading the larger Walmart/PANDA lot with about 1315 parking spaces.
 
-
-
-## Verify Step 1
-
-Run:
-
-```powershell
-python -m pytest tests -q
-```
-
-This basicalyy checks that the basic domain objects are working.
-
-
-## Step 2: Add Driver Parameters, Population Setup, And Real Lot Input
+## Step 2: Driver Behavior Parameters And Populations
 
 This step defines who the drivers are, how their behavior is parameterized, and how the project begins connecting to the real Walmart/PANDA parking lot data.
 
-4. Define behavioral parameters that hold the utility weights  
+4. Define behavioral parameters that hold utility weights  
    `panda_abm/behavior/parameters.py`
 
-   These weights describe what the driver cares about when evaluating parking spaces, such as walking distance, price, search time, rule risk, availability, and familiarity.
+   These weights describe what a driver cares about when evaluating parking spaces, such as walking distance, price, search time, rule risk, availability, familiarity, guidance, and compliance.
 
 5. Define CPT reference points for later M2 behavior  
    `panda_abm/behavior/references.py`
@@ -62,50 +59,14 @@ This step defines who the drivers are, how their behavior is parameterized, and 
 8. Add the real Walmart/PANDA lot configuration file  
    `data/lot_config.json`
 
-   This file contains the real parking-space layout and markings for the Walmart/PANDA case study. It allows the project to move beyond the small synthetic lot when needed.
+   This file contains the real parking-space layout and markings for the Walmart/PANDA case study.
 
-At this stage, the model has both:
+The model now has both:
 
 - a small synthetic facility for quick testing
 - a real lot configuration input for the Walmart/PANDA case study
 
-## Verify Step 2
-
-Run:
-
-```powershell
-python -m pytest tests -q
-```
-
-## Current Test File
-
-The current test file is:
-
-`tests/test_stage_a_domain.py`
-
-This test file checks the foundation of the model before the full agent simulation is added.
-
-It tests that:
-
-1. The behavior parameter objects can be created.
-
-2. The driver attribute and population objects can be created.
-
-3. The synthetic parking facility can be generated.
-
-4. The synthetic facility contains parking spaces, entry points, and exit points.
-
-5. Parking-space states can be initialized correctly.
-
-6. The real Walmart/PANDA lot configuration can be loaded from:
-
-   `data/lot_config.json`
-
-7. The loaded lot config produces a valid facility object with real parking spaces.
-
-At this point, this test does not test driver movement, parking search, utility choice, event logging, or metrics yet. Those will come in later stages.
-
-## Step 3: Add Driver Perception And Choice Set Logic
+## Step 3: Perception And Choice Sets
 
 This step connects the driver behavior setup to the parking environment.
 
@@ -115,9 +76,9 @@ This step connects the driver behavior setup to the parking environment.
    This file determines which parking spaces a driver can see within a search radius. It also records whether each observed space is truly occupied and whether it appears available to the driver.
 
 10. Define the driver choice set  
-   `panda_abm/environment/choice_set.py`
+    `panda_abm/environment/choice_set.py`
 
-   This file filters the visible parking spaces into the spaces the driver is actually allowed to consider. The filters include availability, accessibility eligibility, reserved-space permits, vehicle compatibility, and walking-distance limits.
+    This file filters visible spaces into spaces the driver is actually allowed to consider. The filters include availability, accessibility eligibility, reserved-space permits, vehicle compatibility, and walking-distance limits.
 
 After this step, the model can separate:
 
@@ -125,110 +86,99 @@ After this step, the model can separate:
 - spaces the driver can see
 - spaces the driver is allowed to choose from
 
-## Verify Step 3
+## Step 4: Decision Models
 
-Run:
+This step adds the decision logic used when a driver evaluates candidate parking spaces.
 
-```powershell
-python -m pytest tests -q
+The current suite compares three decision-model levels:
 
+- `M0 deterministic`
+- `M1 random utility`
+- `M2 cumulative prospect theory`
+
+The decision files are stored in:
+
+```text
+panda_abm/behavior/decision/
 ```
 
-## Step 4: Add Event Logging, Resource Control, Forecasting Hooks, And The Mesa Simulation Model
+The same environment and population can be run through different behavioral assumptions.
 
-This step turns the domain, perception, and decision logic into a working simulation. At this point, the project moves from separate building blocks into a model that can run driver agents through a parking search process.
+### M0 Deterministic Choice
+
+The deterministic model chooses the feasible parking space with the highest utility.
+
+It is useful as a clean baseline because it assumes the driver always picks the best option according to the utility function.
+
+### M1 Random Utility Choice
+
+The random utility model uses a softmax-style choice rule. Better spaces are more likely to be selected, but the driver does not always choose the exact maximum.
+
+This is useful because real drivers do not behave perfectly every time.
+
+### M2 CPT Choice
+
+The CPT model builds from the random utility model but adds reference-dependent behavior.
+
+This allows walking distance and search time to be evaluated relative to what the driver expected. It is useful for representing disappointment, tolerance, and sensitivity to losses.
+
+## Step 5: Simulation, Events, Metrics, And Exports
+
+This step turns the domain, perception, and decision logic into a working simulation.
 
 11. Define the event logger  
-   `panda_abm/core/events.py`
+    `panda_abm/core/events.py`
 
-   This file records what happens during the simulation. It logs events such as driver arrivals, search starts, candidate observations, candidate evaluations, target selections, parking attempts, successful parking, abandoned searches, and system snapshots.
+    This file records what happens during the simulation. It logs driver arrivals, search starts, candidate observations, candidate evaluations, target selections, parking attempts, successful parking, abandoned searches, and system snapshots.
 
 12. Define the parking resource manager  
-   `panda_abm/core/resource_manager.py`
+    `panda_abm/core/resource_manager.py`
 
-   This file controls parking-space claims and releases. It keeps the rule that one parking space can only be occupied by one vehicle at a time.
+    This file controls parking-space claims and releases. It keeps the rule that one parking space can only be occupied by one vehicle at a time.
 
 13. Define forecasting hooks  
-   `panda_abm/forecasting/base.py`  
-   `panda_abm/forecasting/null.py`  
-   `panda_abm/forecasting/perfect.py`  
-   `panda_abm/forecasting/noisy.py`
+    `panda_abm/forecasting/`
 
-   These files create a clean place for future prediction logic. The current version can run with no forecast, a perfect forecast control condition, or a noisy forecast condition. This does not train an AI model yet. It only prepares the simulation for later digital-twin prediction work.
+    These files create a place for future prediction logic. The current version can run with no forecast, a perfect forecast control condition, or a noisy forecast condition. This does not train an AI model yet.
 
 14. Define the driver agent  
-   `panda_abm/core/agent.py`
+    `panda_abm/core/agent.py`
 
-   This file defines one driver in the parking simulation. The driver moves through states such as arriving, searching, targeting, parked, walking to the destination, returning to the vehicle, exiting, left, or abandoned.
+    This file defines one driver in the parking simulation. The driver moves through states such as arriving, searching, targeting, parked, walking to the destination, returning to the vehicle, exiting, left, or abandoned.
 
 15. Define the parking model  
-   `panda_abm/core/model.py`
+    `panda_abm/core/model.py`
 
-   This file defines the Mesa model that holds the facility, driver population, parking-space states, decision model, event logger, resource manager, forecasting hook, and simulation clock.
+    This file defines the Mesa model that holds the facility, driver population, parking-space states, decision model, event logger, resource manager, forecasting hook, and simulation clock.
 
 16. Define metrics from simulation events  
-   `panda_abm/metrics/collector.py`
+    `panda_abm/metrics/collector.py`
 
-   This file turns the event log into result tables, including agent outcomes, system metrics, decision logs, and trajectories.
+    This file turns the event log into result tables, including agent outcomes, system metrics, decision logs, and trajectories.
 
 17. Define analysis plots  
-   `panda_abm/analysis/plots.py`
+    `panda_abm/analysis/plots.py`
 
-   This file creates standard figures for search time, walking distance, chosen spaces, and occupancy over time.
+    This file creates standard figures for search time, walking distance, chosen spaces, occupancy over time, and persona-level comparisons.
 
 18. Define JSON exports for digital-twin use  
-   `panda_abm/export/json_exporter.py`
+    `panda_abm/export/json_exporter.py`
 
-   This file exports event streams, vehicle trajectories, and simulation state snapshots as JSON.
+    This file exports event streams, vehicle trajectories, and simulation state snapshots as JSON.
 
 19. Define the digital-twin state snapshot  
-   `panda_abm/twin/state.py`
+    `panda_abm/twin/state.py`
 
-   This file creates a structured state snapshot with vehicles, parking spaces, and system occupancy. This is the part that can later connect to Cesium.
+    This file creates a structured state snapshot with vehicles, parking spaces, and system occupancy. This is the part that can later connect to Cesium.
 
 20. Define the experiment runner  
-   `panda_abm/simulation/runner.py`
+    `panda_abm/simulation/runner.py`
 
-   This file runs the simulation across decision models and repetitions, then saves metrics, plots, event logs, trajectories, and digital-twin JSON outputs.
+    This file runs the simulation across decision models and repetitions, then saves metrics, plots, event logs, trajectories, and digital-twin JSON outputs.
 
-After this step, the project can run a full simulation experiment instead of only testing individual objects.
+## Step 6: Demo Experiment
 
-The model can now:
-
-- create driver agents
-- advance simulation time
-- let drivers search for visible and feasible spaces
-- evaluate candidate spaces with the selected decision model
-- claim and release parking spaces safely
-- record events during the run
-- derive metrics from the event log
-- export CSV, plots, and JSON files for later Cesium integration
-
-## Verify Step 4
-
-Run:
-
-```powershell
-python -m pytest tests -q
-```
-
-## Step 5: Run Demo Experiments And Generate Outputs
-
-At this stage, the main simulation code is in place and the test suite passes. The next step is to run the model and generate research outputs.
-
-The experiment runner compares the three decision-model levels:
-
-- `M0 deterministic`: chooses the highest-utility feasible space
-- `M1 random utility`: uses softmax choice, so the driver usually prefers better spaces but can still vary
-- `M2 CPT`: adds reference-dependent valuation for walking distance and search time
-
-The current behavior profile is still focused on the first persona:
-
-- `convenience_seeker`
-
-This is intentional. The first full experiment checks that one driver behavior profile works end to end before adding more personas.
-
-## Run A Small Demo
+The demo uses the small synthetic facility. This should be run first because it is quick and easier to inspect.
 
 Run:
 
@@ -236,50 +186,132 @@ Run:
 python scripts\run_demo.py --output results\demo_research
 ```
 
-The demo is a quick pipeline check. It confirms that the simulation runs, metrics are produced, plots are created, and JSON exports are written.
+The demo checks that the full pipeline works:
 
-## Run A Larger Baseline Experiment
+- simulation runs
+- events are recorded
+- metrics are produced
+- plots are created
+- JSON exports are written
+
+## Step 7: Real Lot Baseline Experiment
+
+The real lot baseline uses the Walmart/PANDA parking layout from:
+
+```text
+data/lot_config.json
+```
 
 Run:
 
 ```powershell
-python scripts\run_experiment.py --repetitions 10 --population-size 48 --initial-occupancy-rate 0.35 --output results\baseline
+python scripts\run_experiment.py --facility-config data\lot_config.json --output results\real_lot_baseline --scenario-id real_lot_baseline --seed 42 --repetitions 10 --population-size 48 --initial-occupancy-rate 0.35
 ```
 
-The larger run gives a better baseline than the small demo because it uses more drivers and more repetitions.
+This is the main baseline run for the real facility.
 
-## Output Files
+## Step 8: Stress Test Experiment
 
-After a run, check the output folder:
+The stress test uses the real lot but creates a harder parking condition by increasing occupancy and demand.
+
+Run:
+
+```powershell
+python scripts\run_experiment.py --facility-config data\lot_config.json --output results\stress_test --scenario-id stress_test --seed 42 --repetitions 20 --population-size 80 --initial-occupancy-rate 0.80
+```
+
+The stress test is important because the decision models may look similar in easy conditions. Differences should become clearer when the lot is crowded.
+
+## Step 9: Digital Twin And Future Cesium Integration
+
+The current system is a simulation-based digital twin prototype.
+
+Right now, the model does not train an AI model in real time. Instead, it generates simulated current states, event streams, trajectories, and final state snapshots.
+
+These outputs are saved as JSON:
+
+```text
+twin_exports/
+event_exports/
+state_exports/
+```
+
+Later, Cesium can read these exports or receive streamed versions of the same state fields.
+
+The important digital twin fields include:
+
+- vehicle ID
+- persona
+- vehicle state
+- x and y position
+- chosen parking space
+- search time
+- candidate parking spaces
+- parking-space status
+- system occupancy
+
+This keeps Cesium integration possible without forcing the visualization into the first research experiments.
+
+## Output Folder Structure
+
+Each experiment writes outputs like this:
 
 ```text
 results/
   raw/
-    events/events.csv
-    agents/agent_metrics.csv
-    system/system_metrics.csv
+    events/
+      events.csv
+    agents/
+      agent_metrics.csv
+    system/
+      system_metrics.csv
     decision_log.csv
-    trajectories/trajectories.csv
+    trajectories/
+      trajectories.csv
+
   tables/
     model_comparison.csv
+    persona_comparison.csv
+    decision_model_persona_comparison.csv
+
   figures/
     search_time_distribution.png
     walking_distance_boxplot.png
     chosen_space_distribution.png
     occupancy_over_time.png
+    success_rate_by_persona.png
+    search_time_by_persona.png
+    walking_distance_by_persona.png
+    decision_model_by_persona.png
+
   twin_exports/
     vehicle trajectory JSON, one file per run
+
   event_exports/
     raw event stream JSON, one file per run
+
   state_exports/
     final digital-twin state JSON, one file per run
 ```
 
-Start with:
+## Main Metrics
 
-`results/baseline/tables/model_comparison.csv`
+The standard agent-level metrics include:
 
-This table reports:
+- `persona`
+- `decision_model`
+- `run_id`
+- `driver_id`
+- `success`
+- `abandoned`
+- `chosen_space_id`
+- `search_time`
+- `walking_distance`
+- `search_distance`
+- `rejected_spaces`
+- `final_state`
+
+The summary tables report:
 
 - success rate
 - abandonment rate
@@ -290,22 +322,7 @@ This table reports:
 - mean search distance
 - mean rejected spaces
 
-## Why The Demo Variants Can Look Similar
-
-The demo is intentionally easy. It uses one main driver persona, a manageable synthetic environment, and a moderate occupancy level. Under those conditions, M0, M1, and M2 can all park most drivers successfully.
-
-That does not mean the decision models are identical. In the demo output, walking distance and search distance can still differ across models. The headline success and abandonment rates may look similar because the scenario does not create enough pressure.
-
-Stronger differences should appear after testing harder scenarios, such as:
-
-- higher initial occupancy
-- larger driver populations
-- tighter acceptance thresholds
-- more unavailable or restricted spaces
-- multiple driver personas
-- stronger differences in search tolerance and walking tolerance
-
-## Current Test Result
+## Verify The Code
 
 Run:
 
@@ -313,26 +330,28 @@ Run:
 python -m pytest tests -q
 ```
 
-Current result:
+A passing test suite means the domain objects, behavior setup, decision models, simulation model, event logging, metrics, plots, exports, and digital-twin state outputs are working.
 
-```text
-23 passed
+## Suggested Run Order
+
+Use this order when reproducing the project:
+
+```powershell
+python -m pytest tests -q
+
+python scripts\run_demo.py --output results\demo_research
+
+python scripts\run_experiment.py --facility-config data\lot_config.json --output results\real_lot_baseline --scenario-id real_lot_baseline --seed 42 --repetitions 10 --population-size 48 --initial-occupancy-rate 0.35
+
+python scripts\run_experiment.py --facility-config data\lot_config.json --output results\stress_test --scenario-id stress_test --seed 42 --repetitions 20 --population-size 80 --initial-occupancy-rate 0.80
 ```
 
-This confirms that the domain objects, decision models, simulation model, event logging, metrics, plots, exports, and digital-twin state outputs are working.
+## Notes
 
-## Next Development Step
+The small demo is mainly a pipeline check.
 
-The next model-development step is to add more personas and scenario mixes. The current implementation focuses on `convenience_seeker`. Future behavior profiles can include:
+The real lot baseline is the main Walmart/PANDA experiment.
 
-- cost-sensitive driver
-- time-sensitive driver
-- risk-averse driver
-- accessibility-seeking driver
+The stress test is used to make behavioral differences easier to see.
 
-Those profiles will be added by expanding:
-
-- `panda_abm/behavior/parameters.py`
-- `panda_abm/behavior/factory.py`
-
-After that, Cesium integration can use the JSON exports already produced by the simulation.
+Cesium integration will come later. The current code already prepares for it through digital-twin JSON exports.
