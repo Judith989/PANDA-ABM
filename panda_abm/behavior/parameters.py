@@ -33,6 +33,9 @@ class BehavioralParameters:
     beta_enforcement: float = 0.8
     decision_temperature: float = 0.35
     acceptance_utility_threshold: float = 1.75
+    beta_exit: float = 0.0  # Optional preference for proximity to the driver's intended lot exit.
+    beta_approach: float = 0.0
+    beta_accessibility: float = 0.0
 
     def as_dict(self) -> dict[str, float]:
         return asdict(self)
@@ -48,7 +51,26 @@ PERSONA_PARAMETER_PROFILES: dict[str, BehavioralParameters] = {
         beta_familiarity=0.40,
         acceptance_utility_threshold=1.75,
         decision_temperature=0.35,
-    )
+    ),
+    # Experimental profiles. Active weights sum to 3.2, as in the baseline;
+    # this limits utility-scale differences from changing acceptance by accident.
+    "cost_sensitive": BehavioralParameters(
+        beta_walk=.5, beta_price=1.2, beta_search=.4, beta_availability=.6,
+        beta_risk=.3, beta_familiarity=.2,
+    ),
+    "time_sensitive": BehavioralParameters(
+        beta_walk=.7, beta_price=.1, beta_search=.8, beta_availability=.6,
+        beta_risk=.2, beta_familiarity=.2, beta_approach=.6,
+        acceptance_utility_threshold=1.45,
+    ),
+    "risk_averse": BehavioralParameters(
+        beta_walk=.4, beta_price=.1, beta_search=.3, beta_availability=.8,
+        beta_risk=1.4, beta_familiarity=.2, decision_temperature=.20,
+    ),
+    "accessibility_seeking": BehavioralParameters(
+        beta_walk=1., beta_price=.1, beta_search=.3, beta_availability=.6,
+        beta_risk=.3, beta_familiarity=.2, beta_accessibility=.7,
+    ),
 }
 
 

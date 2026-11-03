@@ -49,6 +49,7 @@ def build_twin_state(model, state_type: str = "simulated_current") -> dict:
         "run_id": model.run_id,
         "scenario_id": model.scenario_id,
         "decision_model": model.decision_model_name,
+        "information_mode": model.information_mode,
         "time_s": model.clock_s,
         "state_type": state_type,
         "author": "Judith Njoku",

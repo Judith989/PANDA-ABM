@@ -23,6 +23,8 @@ class PerceivedSpace:
     true_occupied: bool
     perceived_available: bool
     forecast_available_probability: float | None = None
+    information_source: str = 'local'
+    observed_at_s: float | None = None
 
 
 class RadiusPerception:
@@ -47,6 +49,21 @@ class RadiusPerception:
                     true_occupied=state.occupied,
                     perceived_available=(not state.occupied) and (not state.unavailable),
                     forecast_available_probability=probability,
+                    observed_at_s=model.clock_s,
                 )
             )
         return observations
+
+
+class SpaceInformationPerception:
+    """Accurate current space reports, refreshed at a searching driver's scan.
+
+    This exposes current occupancy beyond visibility, never future availability
+    or another driver's intention. It neither reserves spaces nor updates a
+    committed target while travelling. Legacy forecast providers are separate.
+    """
+    def observe(self,model,agent):
+        return [PerceivedSpace(space=s,distance_from_driver_m=math.dist((s.x_m,s.y_m),(agent.x_m,agent.y_m)),
+            true_occupied=model.space_states[s.space_id].occupied,
+            perceived_available=not(model.space_states[s.space_id].occupied or model.space_states[s.space_id].unavailable),
+            information_source='space_report',observed_at_s=model.clock_s) for s in model.facility.spaces]

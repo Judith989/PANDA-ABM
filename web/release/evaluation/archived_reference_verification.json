@@ -1,0 +1,27 @@
+{
+  "population": 80,
+  "occupancy": 0.8,
+  "seed": 1000,
+  "model": "cpt",
+  "cases": [
+    {
+      "information": "unaided",
+      "outcome_signature_matches": true,
+      "population_matches": true,
+      "outcome_sha256": "bd1e116967bb112313efa2204173c6d86af474de89c77b274f86edb281403421"
+    },
+    {
+      "information": "aisle",
+      "outcome_signature_matches": true,
+      "population_matches": true,
+      "outcome_sha256": "e57f960e45dc8cd637987fb108f887a2963eb71c56465a45ebb0f9fcbe519464"
+    },
+    {
+      "information": "space",
+      "outcome_signature_matches": true,
+      "population_matches": true,
+      "outcome_sha256": "fd963141fe278e89373c7c42b7ee2fff7bfabfe3c00485bd08bd4eea5ca6cc17"
+    }
+  ],
+  "archive": "tcss_first_batch_20261028"
+}

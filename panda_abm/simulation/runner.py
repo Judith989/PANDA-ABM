@@ -16,7 +16,7 @@ from panda_abm.analysis import (
     plot_search_time_distribution,
     plot_walking_distance_boxplot,
 )
-from panda_abm.behavior.factory import make_population
+from panda_abm.behavior.factory import make_population,make_controlled_population
 from panda_abm.behavior.population import PopulationSpec
 from panda_abm.core.model import ParkingModel
 from panda_abm.environment import Facility, generate_synthetic_facility
@@ -35,6 +35,10 @@ class RunConfig:
     heterogeneous: bool = True
     initial_occupancy_rate: float = 0.25
     decision_models: tuple[str, ...] = ("deterministic", "rum", "cpt")
+    personas: tuple[str, ...] | None = None  # Explicit legacy controlled mixtures only.
+    cpt_profile_mode: str = 'shared'
+    cpt_parameter_mode: str = 'continuous'
+    information_mode: str = 'unaided'
 
 
 def run_decision_model_comparison(
@@ -47,11 +51,15 @@ def run_decision_model_comparison(
 
     output_dir = Path(output_dir)
     facility = facility or generate_synthetic_facility(seed=config.seed)
+    if population is None and config.personas is not None:
+        population=make_controlled_population(facility,size=config.population_size,seed=config.seed,
+            heterogeneous=config.heterogeneous,personas=config.personas,cpt_profile_mode=config.cpt_profile_mode)
     population = population or make_population(
         facility,
         size=config.population_size,
         seed=config.seed,
         heterogeneous=config.heterogeneous,
+        cpt_parameter_mode=config.cpt_parameter_mode,
     )
 
     agent_frames = []
@@ -72,6 +80,7 @@ def run_decision_model_comparison(
                 scenario_id=config.scenario_id,
                 seed=rep_seed,
                 initial_occupancy_rate=config.initial_occupancy_rate,
+                information_mode=config.information_mode,
             )
             model.run_until_complete()
             events = model.metrics.events()
@@ -87,6 +96,7 @@ def run_decision_model_comparison(
                 "run_id": run_id,
                 "replication_id": f"rep{rep:03d}",
                 "decision_model": decision_model,
+                "information_mode": config.information_mode,
                 "facility_id": facility.facility_id,
                 "population_id": population.population_id,
                 "seed": rep_seed,
@@ -120,7 +130,9 @@ def run_decision_model_comparison(
 def summarize_agent_metrics(agent_metrics: pd.DataFrame) -> pd.DataFrame:
     """Return standard model-comparison metrics."""
 
-    grouped = agent_metrics.groupby("decision_model", dropna=False)
+    # Legacy/external frames can still encode failed drivers' walks as zero.
+    observed=agent_metrics.assign(walking_distance=agent_metrics.walking_distance.where(agent_metrics.parked))
+    grouped = observed.groupby("decision_model", dropna=False)
     return grouped.agg(
         drivers=("driver_id", "count"),
         success_rate=("parked", "mean"),

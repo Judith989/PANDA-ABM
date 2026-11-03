@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "",
+  "buildCommand": "node web/build.mjs",
+  "outputDirectory": "web/dist",
+  "headers": [
+    {"source": "/engine/runtime/pyodide.asm.wasm", "headers": [{"key": "Content-Type", "value": "application/wasm"}]},
+    {"source": "/engine/manifest.json", "headers": [{"key": "Cache-Control", "value": "no-store"}]},
+    {"source": "/engine/python-source.zip", "headers": [{"key": "Cache-Control", "value": "no-cache"}]}
+  ]
+}

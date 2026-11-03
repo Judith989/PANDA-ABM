@@ -13,6 +13,7 @@ import pandas as pd
 
 from panda_abm.behavior.parameters import BehavioralParameters
 from panda_abm.behavior.references import ReferencePoints
+from panda_abm.behavior.cpt_parameters import CPTParameters
 from panda_abm.environment.parking_space import ParkingSpace
 
 __author__ = "Judith Njoku"
@@ -34,6 +35,16 @@ class DecisionContext:
     familiarity: float = 0.5
     allow_illegal_alternatives: bool = False
     rng_seed: int | None = None
+    preferred_exit_id: str | None = None
+    search_speed_m_per_s: float = 5.0
+    max_walking_distance_m: float | None = None
+    approach_times_s: dict[str, float] = field(default_factory=dict)
+    availability_probabilities: dict[str, float] = field(default_factory=dict)
+    decision_interval_s: float = 10.0
+    failure_delay_s: float = 30.0
+    continuation_outcomes: tuple[tuple[float, float], ...] | None = None
+    remaining_search_time_s: float | None = None
+    cpt_parameters: CPTParameters | None = None
 
 
 @dataclass(frozen=True)

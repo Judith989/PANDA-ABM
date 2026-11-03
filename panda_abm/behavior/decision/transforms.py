@@ -25,6 +25,9 @@ class FeatureSpec:
 
 
 FEATURE_SPECS: dict[str, FeatureSpec] = {
+    "approach_time_s": FeatureSpec("approach_time_s", -1, 120., "beta_approach", "Estimated time to reach the candidate from the current position"),
+    "accessibility_match": FeatureSpec("accessibility_match", 1, 1., "beta_accessibility", "Accessible space for an eligible driver"),
+    "exit_distance_m": FeatureSpec("exit_distance_m", -1, 300.0, "beta_exit", "Straight-line distance to the driver's preferred parking-lot exit"),
     "walking_distance_m": FeatureSpec("walking_distance_m", -1, 250.0, "beta_walk", "Walking distance to destination"),
     "price_per_hour": FeatureSpec("price_per_hour", -1, 10.0, "beta_price", "Parking price"),
     "search_time_s": FeatureSpec("search_time_s", -1, 600.0, "beta_search", "Accumulated search time"),
@@ -79,10 +82,20 @@ def build_candidate_features(
     familiarity: float,
     availability_probability: float | None = None,
     rule_risk: float | None = None,
+    preferred_exit_id: str | None = None,
+    current_position_m: tuple[float, float] = (0., 0.),
+    search_speed_m_per_s: float = 5.,
+    accessibility_eligibility: bool = False,
 ) -> dict[str, float]:
     """Construct raw candidate features with explicit units."""
 
     return {
+        "approach_time_s": euclidean_distance_m(current_position_m, (candidate.x_m, candidate.y_m)) / max(search_speed_m_per_s, 1e-9),
+        "accessibility_match": float(candidate.accessible and accessibility_eligibility),
+        "exit_distance_m": (
+            getattr(candidate, f"distance_to_{preferred_exit_id}_m", None) or 0.0
+            if preferred_exit_id else 0.0
+        ),
         "walking_distance_m": euclidean_distance_m((candidate.x_m, candidate.y_m), destination_m),
         "price_per_hour": float(candidate.price_per_hour),
         "search_time_s": float(accumulated_search_time_s),

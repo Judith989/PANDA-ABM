@@ -1,0 +1,7 @@
+# Optional post-simulation discovery and stability analysis.
+scikit-learn
+scipy
+joblib
+threadpoolctl
+cloudpickle
+narwhals

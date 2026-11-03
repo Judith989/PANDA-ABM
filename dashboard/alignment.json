@@ -1,0 +1,27 @@
+{
+  "matched_ids": 1315,
+  "scale": 0.7532033131534763,
+  "rotation_radians": 0.0011292755938475448,
+  "east_m": -17.507160333522048,
+  "north_m": -118.35517466971476,
+  "height_m": 0,
+  "fit_rmse_m": 3.2402851267844235,
+  "max_residual_m": 13.135427941576431,
+  "slot_placement": "Corrected JSON coordinates; legacy slot meshes are not rendered.",
+  "note": "Least-squares scene fit to all matched centres. Building and pavement remain approximate; simulation geometry is unchanged.",
+  "config_sha256": "6cd8d14592ed7590dfe0c00ddd96424d2dc2ab7a9525e36bed968a6d3ef250a4",
+  "source_sha256": {
+    "parking_spots.glb": "67aa708c980630294440bf6be9f8a86da06a87dca668000ae8ff47941b6a3a41",
+    "walmart_building.glb": "94283c9cbf5f9443bc1ef0b496c9eab19d3a77ed3a7bc9cb47f54ce76b905bef",
+    "parking_asphalt.glb": "b64de160b5ac7a1f150e51c7bc26ed71587bf581291a3a7d5dbb6f33dd1ee6f8"
+  },
+  "asset_sha256": {
+    "parking_asphalt.glb": "f7ff1105518bff2c40a48304256dcf10d02cd7d61cd46121558fc1ac7a3e2c5f",
+    "walmart_building.glb": "2f8ca412fafee9023bac24788f68380a0edf89fa93508e341215fd2b5cace609"
+  },
+  "cesium_axes": {
+    "up": "Y",
+    "forward": "X",
+    "mapping": "glTF x,y,z -> ENU x,-z,y; disable Z-forward adaptation"
+  }
+}

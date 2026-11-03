@@ -34,6 +34,8 @@ def test_decision_model_comparison_writes_standard_outputs(tmp_path):
     assert not outputs["trajectories"].empty
     assert not outputs["event_log"].empty
     assert set(outputs["agent_metrics"]["decision_model"]) == {"deterministic", "rum", "cpt"}
+    metrics = outputs['agent_metrics']
+    assert (metrics.search_time - (metrics.search_ended_s - metrics.search_started_s)).abs().max() < 1e-9
 
     expected_files = [
         tmp_path / "raw" / "events" / "events.csv",

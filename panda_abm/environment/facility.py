@@ -12,6 +12,7 @@ import json
 import numpy as np
 
 from panda_abm.core.states import SpaceType
+from panda_abm.environment.coordinates import lat_lon_to_local_m
 from panda_abm.environment.parking_space import (
     ParkingSpace,
     ParkingSpaceState,
@@ -31,6 +32,10 @@ class Facility:
     exit_points: tuple[tuple[float, float], ...]
     coordinate_system: str = "local_m"
     synthetic: bool = False
+    walmart_doors: tuple[tuple[float, float], ...] = ()
+    entry_point_ids: tuple[str, ...] = ()
+    exit_point_ids: tuple[str, ...] = ()
+    walmart_door_ids: tuple[str, ...] = ()
 
     @property
     def space_by_id(self) -> dict[str, ParkingSpace]:
@@ -103,14 +108,24 @@ def load_facility_from_lot_config(path: str | Path) -> Facility:
 
     spaces = tuple(parking_space_from_lot_config_slot(slot) for slot in raw["slots"])
     meta = raw.get("meta", {})
-    entry_points = tuple((float(p["lon"]), float(p["lat"])) for p in raw.get("entry_points", []))
-    exit_points = tuple((float(p["lon"]), float(p["lat"])) for p in raw.get("exit_points", []))
+    def local_points(key: str) -> tuple[tuple[float, float], ...]:
+        return tuple(
+            lat_lon_to_local_m(float(p["lat"]), float(p["lon"]), float(meta["ref_lat"]), float(meta["ref_lon"]))
+            for p in raw.get(key, [])
+        )
+
+    entry_points = local_points("entry_points")
+    exit_points = local_points("exit_points")
     return Facility(
         facility_id=str(meta.get("lot_name", "panda_lot")).lower().replace(" ", "_"),
         name=str(meta.get("lot_name", "PANDA Facility")),
         spaces=spaces,
         entry_points=entry_points,
         exit_points=exit_points,
-        coordinate_system="lon_lat",
+        coordinate_system="local_m",
         synthetic=False,
+        walmart_doors=local_points("walmart_doors"),
+        entry_point_ids=tuple(p["id"] for p in raw.get("entry_points", [])),
+        exit_point_ids=tuple(p["id"] for p in raw.get("exit_points", [])),
+        walmart_door_ids=tuple(p["id"] for p in raw.get("walmart_doors", [])),
     )

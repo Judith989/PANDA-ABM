@@ -14,7 +14,11 @@ __author__ = "Judith Njoku"
 
 @dataclass(frozen=True)
 class SimpleContinuationModel:
-    """A modest first version of the value of searching longer."""
+    """Legacy heuristic retained for compatibility.
+
+    CPTDecisionModel now compares explicit continuation and parking prospects;
+    this heuristic is not part of its cumulative-prospect calculation.
+    """
 
     opportunity_weight: float = 0.45
     time_penalty_weight: float = 0.35

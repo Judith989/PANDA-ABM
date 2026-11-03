@@ -5,6 +5,8 @@ Author: Judith Njoku
 
 from __future__ import annotations
 
+from panda_abm.behavior.cpt_parameters import CPTParameters
+
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -81,8 +83,14 @@ class EventLogger:
         event_details = dict(details or {})
         if agent is not None:
             event_details.setdefault("persona", agent.attributes.persona)
+            event_details.setdefault("arrival_exit_id", agent.attributes.arrival_exit_id)
+            event_details.setdefault("preferred_exit_id", agent.attributes.preferred_exit_id)
+            event_details.setdefault("walmart_door_id", agent.attributes.walmart_door_id)
             event_details.setdefault("vehicle_type", agent.attributes.vehicle_type)
             event_details.setdefault("arrival_time", agent.arrival_time_s)
+            event_details.setdefault("search_started_s", agent.search_started_s)
+            event_details.setdefault("search_ended_s", agent.search_ended_s)
+            event_details.setdefault("parking_time_s", agent.parking_time_s)
             event_details.setdefault("chosen_space", agent.chosen_space_id)
             event_details.setdefault("chosen_module", agent.chosen_module)
             event_details.setdefault("walking_distance", agent.walking_distance_m)
@@ -94,8 +102,22 @@ class EventLogger:
             event_details.setdefault("utility_of_chosen_action", agent.utility_of_chosen_action)
             event_details.setdefault("r_walk", agent.reference_points.r_walk_m)
             event_details.setdefault("r_search", agent.reference_points.r_search_s)
+            event_details.setdefault("r_exit", agent.reference_points.r_exit_m)
+            event_details.setdefault("distance_reference_policy", agent.reference_points.distance_reference_policy)
+            event_details.setdefault("reference_space_count", agent.reference_points.reference_space_count)
+            override=getattr(agent.decision_model,'cpt_parameters',None)
+            cp=override or agent.spec.cpt_parameters or CPTParameters()
+            if cp is not None:
+                for key,value in cp.as_dict().items():event_details.setdefault(f'cpt_{key}',value)
+            event_details.setdefault('cpt_parameter_source','explicit_model_override' if override is not None else agent.spec.cpt_parameter_source)
             event_details.setdefault("guidance_access", agent.attributes.guidance_access)
+            event_details.setdefault('information_mode',agent.model.information_mode)
+            event_details.setdefault('information_reports_received',agent.information_reports_received)
+            event_details.setdefault('information_route_changes',agent.information_route_changes)
+            event_details.setdefault('remote_targets_selected',agent.remote_targets_selected)
             event_details.setdefault("beta_walk", agent.parameters.beta_walk)
+            event_details.setdefault("beta_approach", agent.parameters.beta_approach)
+            event_details.setdefault("beta_accessibility", agent.parameters.beta_accessibility)
             event_details.setdefault("beta_price", agent.parameters.beta_price)
             event_details.setdefault("beta_search", agent.parameters.beta_search)
             event_details.setdefault("beta_risk", agent.parameters.beta_risk)

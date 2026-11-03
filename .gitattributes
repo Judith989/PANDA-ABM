@@ -1,0 +1,7 @@
+# Preserve the exact bytes recorded in the tested simulation manifest.
+panda_abm/** -text
+data/lot_config.json -text
+dashboard/** -text
+web/release/** -text
+*.glb binary
+*.zip binary

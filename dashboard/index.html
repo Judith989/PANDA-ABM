@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PANDA · Parking simulation platform</title>
+  <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.127/Build/Cesium/Widgets/widgets.css">
+  <link rel="stylesheet" href="style.css?v=20261102r6">
+  <link rel="stylesheet" href="platform.css?v=20261102r6">
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.127/Build/Cesium/Cesium.js" defer></script>
+  <script src="engine/client.js?v=20261102r6" defer></script>
+  <script src="platform.js?v=20261102r6" defer></script>
+  <script src="app.js?v=20261102r6" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="./">P<span>▰</span>NDA<span class="brand-sub">PARKING SIMULATION LAB</span></a><div class="site">Walmart Supercenter <span> / Laramie, Wyoming</span></div><span class="badge">RESEARCH PLATFORM</span></header>
+  <nav class="platform-nav" aria-label="Platform"><button data-page="simulate" aria-current="page">3D simulation</button><button data-page="compare">Matched comparisons</button><button data-page="study">Study results</button><button data-page="about">About &amp; performance</button><span id="engine-status" role="status">Python engine loads when needed</span></nav>
+  <main>
+    <aside class="controls">
+      <div class="eyebrow">EXPERIMENT WORKSPACE</div><h1>Explore parking<br>decisions.</h1><p class="intro">One lot. Different information.<br>Watch individual choices unfold.</p>
+      <form id="scenario">
+        <label for="model">Decision model</label><select id="model" name="model"><option value="cpt">CPT · Prospect theory</option><option value="deterministic">M0 · Deterministic utility</option><option value="rum">M1 · Random utility</option></select>
+        <label for="information">Parking information</label><div class="segmented" id="info-buttons"><button type="button" data-mode="unaided" class="selected">Unaided</button><button type="button" data-mode="aisle">Aisle</button><button type="button" data-mode="space">Space</button></div><input type="hidden" id="information" value="unaided"><p id="info-help" class="help">Drivers observe nearby spaces and search the aisles.</p>
+        <label for="occupancy">Initial occupancy <strong id="occupancy-value">40%</strong></label><input id="occupancy" type="range" min="0" max="100" step="5" value="40">
+        <div class="form-row"><div><label for="population">Drivers</label><input id="population" type="number" min="1" max="120" value="80" required></div><div><label for="arrivals">Arrival gap (s)</label><input id="arrivals" type="number" min="1" max="120" value="20" required></div></div>
+        <label for="seed">Random seed</label><input id="seed" type="number" min="0" max="2147483647" value="1000" required><p class="help">Reuse the seed and trip settings for matched comparisons.</p>
+        <button class="primary" id="live-button" type="button">Start live simulation <span>↗</span></button>
+        <button class="secondary" id="run-button" type="submit">Compute a saved replay</button>
+      </form>
+      <div id="job-status" role="status" aria-live="polite">Loading the saved reference run…</div>
+      <div class="section-label">SAVED RUNS</div><select id="history" aria-label="Select saved run"></select>
+      <button id="download" class="text-button">↓ Download selected run</button>
+      <details><summary>Geometry &amp; alignment</summary><p id="alignment-note"></p><label><input type="checkbox" id="show-context" checked> Show 3D building &amp; pavement</label><label><input type="checkbox" id="show-network" checked> Show inferred aisle network</label><p class="help">Space markers use corrected lot coordinates. Building and pavement alignment remains approximate.</p></details>
+      <div class="footnote">Runs execute on your device.<br>Simulated information is not a reservation.</div>
+    </aside>
+    <section class="workspace">
+      <div class="workspace-top"><div><div class="eyebrow" id="view-mode">SAVED REPLAY · CESIUMJS 3D</div><h2 id="run-title">Reference scenario</h2><p id="run-description">CPT / unaided search / 40% initial occupancy</p></div><div class="view-buttons"><button id="reset-camera" class="light-button">3D view</button><button id="overhead-camera" class="light-button">Overhead · N ↑</button></div></div>
+      <div class="metrics"><article><span>Parked so far</span><strong id="parked">—</strong></article><article><span>Currently searching</span><strong id="searching">—</strong></article><article><span>Lot occupancy</span><strong id="occupied">—</strong></article><article><span>Abandoned so far</span><strong id="abandoned">—</strong></article></div>
+      <div class="map-shell"><div id="cesiumContainer"></div><div id="map-status" role="status">Loading the 3D lot…</div><div class="map-caption"><span class="pulse"></span> Corrected lot configuration <b>1,315 spaces</b></div><div class="map-legend"><span><i class="free"></i>Free</span><span><i class="taken"></i>Occupied</span><span><i class="blocked"></i>Blocked</span><span><i class="vehicle"></i>Driver</span></div></div>
+      <div class="playback"><button id="play" class="play" aria-label="Play replay">▶</button><span id="time">00:00</span><input id="timeline" aria-label="Simulation time" type="range" min="0" max="1" value="0" step="1"><span id="duration">00:00</span><select id="speed" aria-label="Playback speed"><option value="1">1×</option><option value="10">10×</option><option value="30" selected>30×</option><option value="100">100×</option></select></div>
+      <div class="lower-grid"><article class="panel"><div class="section-label">OCCUPANCY THROUGH TIME</div><svg id="chart" viewBox="0 0 660 150" role="img" aria-label="Occupancy through simulation time"></svg><p class="help">Playback speed changes the display clock; it does not change decisions.</p></article><article class="panel"><div class="section-label">INSPECT A DRIVER OR SPACE</div><div id="inspection">Click a vehicle or a parking space on the map to inspect it.</div></article><article class="panel outcomes"><div class="section-label">COMPLETED RUN OUTCOMES</div><div id="outcomes">Loading…</div><p class="help">Search includes all arrivals; walking and exit distance include parked drivers only.</p></article></div>
+      <div id="verification" class="verification"></div>
+    </section>
+  </main>
+</body>
+</html>

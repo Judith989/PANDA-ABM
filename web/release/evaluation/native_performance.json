@@ -1,0 +1,83 @@
+{
+  "measured_utc": "2026-11-03T00:05:25.417558+00:00",
+  "os": "Windows-11-10.0.26200-SP0",
+  "processor": "Intel64 Family 6 Model 158 Stepping 13, GenuineIntel",
+  "runtime": {
+    "python": "3.12.14",
+    "numpy": "2.5.4",
+    "pandas": "3.1.0",
+    "mesa": "3.5.1",
+    "networkx": "3.7"
+  },
+  "scope": "One process; full trip lifecycle; no trajectory sampling or rendering",
+  "timings": [
+    {
+      "population": 20,
+      "repeat": 0,
+      "wall_s": 3.497086099931039,
+      "initialize_wall_s": 0.11579209996853024,
+      "simulated_duration_s": 3966.0
+    },
+    {
+      "population": 20,
+      "repeat": 1,
+      "wall_s": 3.5531287000048906,
+      "initialize_wall_s": 0.15463260002434254,
+      "simulated_duration_s": 4074.0
+    },
+    {
+      "population": 20,
+      "repeat": 2,
+      "wall_s": 3.4366589999990538,
+      "initialize_wall_s": 0.08259540004655719,
+      "simulated_duration_s": 3881.0
+    },
+    {
+      "population": 80,
+      "repeat": 0,
+      "wall_s": 8.67277429997921,
+      "initialize_wall_s": 0.15708190004806966,
+      "simulated_duration_s": 5269.0
+    },
+    {
+      "population": 80,
+      "repeat": 1,
+      "wall_s": 9.053832900011912,
+      "initialize_wall_s": 0.3789069999475032,
+      "simulated_duration_s": 5228.0
+    },
+    {
+      "population": 80,
+      "repeat": 2,
+      "wall_s": 9.169826600002125,
+      "initialize_wall_s": 0.12962460005655885,
+      "simulated_duration_s": 5229.0
+    },
+    {
+      "population": 120,
+      "repeat": 0,
+      "wall_s": 11.81010400003288,
+      "initialize_wall_s": 0.17344310006592423,
+      "simulated_duration_s": 5536.0
+    },
+    {
+      "population": 120,
+      "repeat": 1,
+      "wall_s": 12.747811799985357,
+      "initialize_wall_s": 0.1942708999849856,
+      "simulated_duration_s": 6038.0
+    },
+    {
+      "population": 120,
+      "repeat": 2,
+      "wall_s": 12.672276399913244,
+      "initialize_wall_s": 0.21715139993466437,
+      "simulated_duration_s": 5936.0
+    }
+  ],
+  "median_wall_s": {
+    "20": 3.497086099931039,
+    "80": 9.053832900011912,
+    "120": 12.672276399913244
+  }
+}

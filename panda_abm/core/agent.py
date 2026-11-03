@@ -1,251 +1,194 @@
-"""Generic Mesa driver agent.
-
-Author: Judith Njoku
-"""
-
+"""Drivers follow connected aisles, patrol repeatedly, and time search by timestamps."""
 from __future__ import annotations
-
 import math
-
 from mesa import Agent
-
-from panda_abm.behavior.decision.base import DecisionContext, DecisionModel, DecisionResult
-from panda_abm.behavior.population import DriverSpec
+from panda_abm.behavior.decision.base import DecisionContext
 from panda_abm.core.states import DriverState
-from panda_abm.environment.parking_space import ParkingSpace
-
-__author__ = "Judith Njoku"
-
 
 class DriverAgent(Agent):
-    """One driver who searches, chooses, parks, visits a destination, then leaves."""
-
-    def __init__(
-        self,
-        model,
-        spec: DriverSpec,
-        decision_model: DecisionModel,
-        start_position_m: tuple[float, float],
-    ):
+    def __init__(self,model,spec,decision_model,start_position_m):
         super().__init__(model)
-        self.spec = spec
-        self.driver_id = spec.driver_id
-        self.attributes = spec.attributes
-        self.parameters = spec.behavioral_parameters
-        self.reference_points = spec.reference_points
-        self.decision_model = decision_model
-        self.state = DriverState.NOT_ARRIVED
-        self.x_m, self.y_m = start_position_m
-        self.search_time_s = 0.0
-        self.search_distance_m = 0.0
-        self.rejected_spaces = 0
-        self.candidate_evaluations = 0
-        self.module_switches = 0
-        self.last_module: str | None = None
-        self.chosen_space_id: str | None = None
-        self.chosen_module: str | None = None
-        self.utility_of_chosen_action: float | None = None
-        self.last_decision: DecisionResult | None = None
-        self.last_candidate_space_ids: list[str] = []
-        self.walking_distance_m: float | None = None
-        self.arrival_time_s = spec.attributes.arrival_time_s
-        self.parking_time_s: float | None = None
-        self.activity_time_left_s = float(spec.attributes.expected_dwell_duration_s)
-        self.violation = False
-        self.lost_space_events = 0
-        self.path: list[tuple[float, float]] = [(self.x_m, self.y_m)]
+        self.spec=spec;self.driver_id=spec.driver_id;self.attributes=spec.attributes
+        self.parameters=spec.behavioral_parameters;self.reference_points=spec.reference_points
+        self.decision_model=decision_model;self.state=DriverState.NOT_ARRIVED
+        self.x_m,self.y_m=start_position_m
+        self.search_time_s=0.;self.search_distance_m=0.;self.rejected_spaces=0;self.candidate_evaluations=0
+        self.module_switches=0;self.last_module=None;self.chosen_space_id=None;self.chosen_module=None
+        self.utility_of_chosen_action=None;self.last_decision=None;self.last_candidate_space_ids=[]
+        self.walking_distance_m=None;self.arrival_time_s=spec.attributes.arrival_time_s
+        self.parking_time_s=None;self.search_started_s=None;self.search_ended_s=None
+        self.activity_time_left_s=float(spec.attributes.expected_dwell_duration_s)
+        self.violation=False;self.lost_space_events=0;self.path=[(self.x_m,self.y_m)]
+        self.route=[];self.patrol_goal=None;self.aisle_visits={};self.next_decision_s=self.arrival_time_s
+        self.last_tick_s=self.arrival_time_s;self.attempt_ready_s=0.;self._candidate_times={};self._candidate_probabilities={}
+        self.information_aisle_id=None;self.information_reports_received=0;self.information_route_changes=0
+        self.remote_targets_selected=0;self._observations_by_id={}
 
-    def step(self) -> None:
-        if self.model.clock_s < self.arrival_time_s:
-            return
-        if self.state == DriverState.NOT_ARRIVED:
-            self.state = DriverState.ARRIVING
-            self.model.event_logger.log("AgentArrived", self.model.clock_s, agent=self)
-            return
-        if self.state == DriverState.ARRIVING:
-            self.state = DriverState.SEARCHING
-            self.model.event_logger.log("SearchStarted", self.model.clock_s, agent=self)
-            return
-        if self.state == DriverState.SEARCHING:
-            self._search_step()
-            return
-        if self.state == DriverState.TARGETING:
-            self._target_step()
-            return
-        if self.state == DriverState.PARKED:
-            self._start_walking_to_destination()
-            return
-        if self.state == DriverState.WALKING_TO_DESTINATION:
-            self.state = DriverState.AT_DESTINATION
-            self.model.event_logger.log("DestinationReached", self.model.clock_s, agent=self)
-            return
-        if self.state == DriverState.AT_DESTINATION:
-            self.activity_time_left_s -= self.model.step_seconds
-            self.model.event_logger.log("AgentActivityStep", self.model.clock_s, agent=self)
-            if self.activity_time_left_s <= 0:
-                self.state = DriverState.RETURNING_TO_VEHICLE
-                self.model.event_logger.log("ReturningToVehicleStarted", self.model.clock_s, agent=self)
-            return
-        if self.state == DriverState.RETURNING_TO_VEHICLE:
-            self._start_exiting()
-            return
-        if self.state == DriverState.EXITING:
-            self.state = DriverState.LEFT
-            self.model.event_logger.log("AgentExited", self.model.clock_s, agent=self)
+    def log(self,event,**kwargs):self.model.event_logger.log(event,self.model.clock_s,agent=self,**kwargs)
 
-    def _search_step(self) -> None:
-        if self.search_time_s >= self.model.max_search_time_s:
-            self.state = DriverState.ABANDONED
-            self.model.event_logger.log("SearchAbandoned", self.model.clock_s, agent=self)
+    def step(self):
+        now=self.model.clock_s
+        if now<self.arrival_time_s or self.state in (DriverState.LEFT,DriverState.ABANDONED):return
+        dt=max(0.,now-self.last_tick_s);self.last_tick_s=now
+        if self.state==DriverState.NOT_ARRIVED:
+            self.state=DriverState.ARRIVING;self.log('AgentArrived');self.search_started_s=now;self.state=DriverState.SEARCHING
+            self.log('SearchStarted');dt=0.
+        if self.state in (DriverState.SEARCHING,DriverState.TARGETING):
+            self.search_time_s=now-self.search_started_s
+            if self.search_time_s>=self.model.max_search_time_s:
+                self.search_ended_s=now;self.state=DriverState.ABANDONED;self.route=[];self.log('SearchAbandoned');return
+        if self.state==DriverState.SEARCHING:
+            self._advance_route(dt)
+            if not self.route and self.patrol_goal is not None:
+                self.aisle_visits[self.patrol_goal]=self.aisle_visits.get(self.patrol_goal,0)+1
+                self.log('AisleEndVisited',details={'node_id':self.patrol_goal})
+                self.patrol_goal=None
+            if now+1e-9>=self.next_decision_s:
+                self.next_decision_s=now+self.model.decision_interval_s
+                self._search_step()
+            if self.state==DriverState.SEARCHING and not self.route:
+                self.patrol_goal=self.model.navigation.next_patrol((self.x_m,self.y_m),self.aisle_visits)
+                self.route=self.model.navigation.route((self.x_m,self.y_m),self.patrol_goal)
             return
-
-        observations = self.model.perceive(self)
-        feasible = self.model.build_choice_set(self, observations)
-        self.last_candidate_space_ids = [space.space_id for space in feasible]
-        self.candidate_evaluations += len(feasible)
-        self.model.event_logger.log(
-            "CandidateObserved",
-            self.model.clock_s,
-            agent=self,
-            details={
-                "observed_count": len(observations),
-                "feasible_count": len(feasible),
-                "candidate_space_ids": "|".join(self.last_candidate_space_ids),
-            },
-        )
-
-        context = self._decision_context()
-        decision = self.decision_model.evaluate_candidates(context, feasible)
-        self.last_decision = decision
-        self._log_decision(decision, feasible, context)
-
-        if decision.chosen_action == "park" and decision.chosen_space_id:
-            self._select_target(decision)
+        if self.state==DriverState.TARGETING:
+            self._advance_route(dt)
+            if self.route or now+1e-9<self.attempt_ready_s:return
+            target=self.model.facility.space_by_id[self.chosen_space_id]
+            self.log('SpaceClaimAttempted',space=target)
+            if self.model.try_park(self,target.space_id):return
+            self.lost_space_events+=1;self.rejected_spaces+=1
+            self.chosen_space_id=None;self.chosen_module=None;self.state=DriverState.SEARCHING
+            self.next_decision_s=now;self.log('LostSpace',space=target);return
+        if self.state==DriverState.PARKED:
+            self.state=DriverState.WALKING_TO_DESTINATION;self.log('WalkingToDestinationStarted')
+        if self.state==DriverState.WALKING_TO_DESTINATION:
+            if now+1e-9>=self.destination_ready_s:
+                self.state=DriverState.AT_DESTINATION;self.dwell_end_s=now+self.attributes.expected_dwell_duration_s
+                self.log('DestinationReached')
             return
+        if self.state==DriverState.AT_DESTINATION:
+            self.activity_time_left_s=max(0.,self.dwell_end_s-now)
+            if now+1e-9>=self.dwell_end_s:
+                self.state=DriverState.RETURNING_TO_VEHICLE
+                self.return_ready_s=now+self.walking_distance_m/self.model.walk_speed_m_per_s
+                self.log('ReturningToVehicleStarted')
+            return
+        if self.state==DriverState.RETURNING_TO_VEHICLE:
+            if now+1e-9>=self.return_ready_s:self._start_exiting()
+            return
+        if self.state==DriverState.EXITING:
+            self._advance_route(dt,count_search=False)
+            if not self.route:self.state=DriverState.LEFT;self.log('AgentExited')
 
-        self.rejected_spaces += len(feasible)
-        self.model.event_logger.log(
-            "CandidateRejected",
-            self.model.clock_s,
-            agent=self,
-            details={"reason": decision.diagnostics.get("reason", "continue_search")},
-        )
-        self._move_toward_destination()
-        self.search_time_s += self.model.step_seconds
+    @property
+    def information_mode(self):
+        return self.model.information_mode_for(self)
 
-    def _decision_context(self) -> DecisionContext:
-        return DecisionContext(
-            driver_id=self.driver_id,
-            behavioral_parameters=self.parameters,
-            reference_points=self.reference_points,
-            accumulated_search_time_s=self.search_time_s,
-            current_position_m=(self.x_m, self.y_m),
-            destination_m=self.attributes.destination,
-            vehicle_type=self.attributes.vehicle_type,
-            accessibility_eligibility=self.attributes.accessibility_eligibility,
-            permit_type=self.attributes.permit_type,
-            familiarity=self.attributes.local_familiarity,
+    def _search_step(self):
+        report=None
+        if self.information_mode=='aisle':
+            report=self.model.aisle_information.snapshot(self)
+            self.information_reports_received+=1
+            self.log('InformationReceived',details=dict(information_mode='aisle',report_time_s=report.observed_at_s,
+                free_counts=report.free_counts,compatible_capacity=report.compatible_capacity))
+        observations=self.model.perceive(self)
+        self._observations_by_id={o.space.space_id:o for o in observations}
+        if self.information_mode=='space':
+            self.information_reports_received+=1
+            self.log('InformationReceived',details=dict(information_mode='space',report_time_s=self.model.clock_s,
+                reported_available=sum(o.perceived_available for o in observations),
+                oldest_observation_s=min((o.observed_at_s for o in observations),default=self.model.clock_s)))
+        feasible=self.model.build_choice_set(self,observations)
+        self.last_candidate_space_ids=[s.space_id for s in feasible]
+        self.candidate_evaluations+=len(feasible)
+        self.log('CandidateObserved',details={'observed_count':len(observations),'feasible_count':len(feasible),
+            'candidate_space_ids':'|'.join(self.last_candidate_space_ids)})
+        self._candidate_times={};self._candidate_probabilities={}
+        if feasible:
+            distances=self.model.navigation.distances((self.x_m,self.y_m),
+                [self.model.navigation.space_nodes[s.space_id] for s in feasible])
+            forecast={o.space.space_id:o.forecast_available_probability for o in observations}
+            for s in feasible:
+                travel=distances[self.model.navigation.space_nodes[s.space_id]]/self.model.search_speed_m_per_s
+                self._candidate_times[s.space_id]=travel+self.model.parking_maneuver_s
+                supplied=forecast[s.space_id]
+                # Explicit assumed survival probability until the claim attempt.
+                p=(1. if supplied is None else supplied)*math.exp(-self.model.claim_hazard_per_s*(travel+self.model.parking_maneuver_s))
+                self._candidate_probabilities[s.space_id]=p
+        context=self._decision_context()
+        decision=self.decision_model.evaluate_candidates(context,feasible)
+        self.last_decision=decision
+        for e in decision.candidate_evaluations:
+            self.log('CandidateEvaluated',space_id=e.space_id,utility=e.utility,probability=decision.probabilities.get(e.space_id),
+                details={'feasible':e.feasible,'chosen':e.space_id==decision.chosen_space_id,
+                    **{f'feature_{k}':v for k,v in e.features.items()},**{f'cpt_{k}':v for k,v in e.diagnostics.items()}})
+        if decision.chosen_action=='park' and decision.chosen_space_id:
+            self._select_target(decision);return
+        self.rejected_spaces+=len(feasible)
+        self.log('CandidateRejected',details={'reason':decision.diagnostics.get('reason','continue_search')})
+        if report is not None:self.model.aisle_information.plan_search(self,report)
+
+    def _decision_context(self):
+        return DecisionContext(driver_id=self.driver_id,behavioral_parameters=self.parameters,reference_points=self.reference_points,
+            accumulated_search_time_s=self.search_time_s,current_position_m=(self.x_m,self.y_m),destination_m=self.attributes.destination,
+            vehicle_type=self.attributes.vehicle_type,accessibility_eligibility=self.attributes.accessibility_eligibility,
+            permit_type=self.attributes.permit_type,familiarity=self.attributes.local_familiarity,
             allow_illegal_alternatives=self.model.allow_illegal_alternatives,
-            rng_seed=self.model.seed_for_driver_step(self.driver_id, int(self.search_time_s)),
-        )
+            rng_seed=self.model.seed_for_driver_step(self.driver_id,self.search_time_s),preferred_exit_id=self.attributes.preferred_exit_id,
+            search_speed_m_per_s=self.model.search_speed_m_per_s,max_walking_distance_m=self.attributes.max_walking_distance_m,
+            approach_times_s=self._candidate_times,availability_probabilities=self._candidate_probabilities,
+            decision_interval_s=self.model.decision_interval_s,failure_delay_s=self.model.failure_delay_s,
+            remaining_search_time_s=max(0.,self.model.max_search_time_s-self.search_time_s),
+            cpt_parameters=self.spec.cpt_parameters)
 
-    def _log_decision(self, decision: DecisionResult, feasible: list[ParkingSpace], context: DecisionContext) -> None:
-        continuation_value = self.model.continuation_model.value(context, len(feasible))
-        self.model.event_logger.log(
-            "ContinuationEvaluated",
-            self.model.clock_s,
-            agent=self,
-            utility=continuation_value,
-            details={"feasible_count": len(feasible)},
-        )
-        for eval_item in decision.candidate_evaluations:
-            self.model.event_logger.log(
-                "CandidateEvaluated",
-                self.model.clock_s,
-                agent=self,
-                space_id=eval_item.space_id,
-                utility=eval_item.utility,
-                probability=decision.probabilities.get(eval_item.space_id),
-                details={
-                    "feasible": eval_item.feasible,
-                    "chosen": eval_item.space_id == decision.chosen_space_id,
-                },
-            )
+    def _select_target(self,decision):
+        target=self.model.facility.space_by_id[decision.chosen_space_id]
+        self.chosen_space_id=target.space_id;self.chosen_module=target.module_id
+        if self.last_module is not None and self.last_module!=target.module_id:self.module_switches+=1
+        self.last_module=target.module_id;self.utility_of_chosen_action=decision.chosen_utility
+        self.route=self.model.navigation.route((self.x_m,self.y_m),self.model.navigation.space_nodes[target.space_id])
+        self.patrol_goal=None;self.state=DriverState.TARGETING
+        self.information_aisle_id=None
+        self.attempt_ready_s=self.model.clock_s+self._candidate_times[target.space_id]
+        observation=self._observations_by_id.get(target.space_id)
+        distance=math.dist((self.x_m,self.y_m),(target.x_m,target.y_m))
+        if distance>self.model.perception_radius_m+1e-9:self.remote_targets_selected+=1
+        self.log('TargetSelected',space=target,utility=decision.chosen_utility,details=dict(
+            information_mode=self.information_mode,target_distance_at_selection_m=distance,
+            information_source=observation.information_source if observation else 'custom',
+            report_time_s=observation.observed_at_s if observation else None))
 
-    def _select_target(self, decision: DecisionResult) -> None:
-        target = self.model.facility.space_by_id[decision.chosen_space_id]
-        self.chosen_space_id = target.space_id
-        self.chosen_module = target.module_id
-        self.utility_of_chosen_action = decision.chosen_utility
-        self.state = DriverState.TARGETING
-        self.model.event_logger.log(
-            "TargetSelected",
-            self.model.clock_s,
-            agent=self,
-            space=target,
-            utility=decision.chosen_utility,
-        )
+    def _advance_route(self,dt,count_search=True):
+        budget=self.model.search_speed_m_per_s*dt
+        while self.route:
+            x,y=self.route[0];dx=x-self.x_m;dy=y-self.y_m;distance=math.hypot(dx,dy)
+            if distance<1e-9:self.route.pop(0);continue
+            if budget<=1e-9:break
+            move=min(distance,budget);self.x_m+=dx/distance*move;self.y_m+=dy/distance*move;budget-=move
+            if count_search:self.search_distance_m+=move
+            self.path.append((self.x_m,self.y_m))
+            if move>=distance-1e-9:self.route.pop(0)
+        if dt and self.state in (DriverState.SEARCHING,DriverState.TARGETING):
+            self.log('VehicleMovingToTarget' if self.state==DriverState.TARGETING else 'VehicleSearchingAisle')
 
-    def _target_step(self) -> None:
-        if not self.chosen_space_id:
-            self.state = DriverState.SEARCHING
-            return
-        target = self.model.facility.space_by_id[self.chosen_space_id]
-        if not self._move_toward(target.x_m, target.y_m):
-            self.search_time_s += self.model.step_seconds
-            self.model.event_logger.log("VehicleMovingToTarget", self.model.clock_s, agent=self, space=target)
-            return
+    def park_at(self,space,utility):
+        self.state=DriverState.PARKED;self.chosen_space_id=space.space_id;self.chosen_module=space.module_id
+        self.utility_of_chosen_action=utility;self.parking_time_s=self.model.clock_s
+        self.search_ended_s=self.parking_time_s;self.search_time_s=self.search_ended_s-self.search_started_s
+        self.walking_distance_m=math.dist((space.x_m,space.y_m),self.attributes.destination)
+        self.x_m=space.x_m;self.y_m=space.y_m;self.path.append((self.x_m,self.y_m))
+        self.destination_ready_s=self.parking_time_s+self.walking_distance_m/self.model.walk_speed_m_per_s
+        self.violation=bool((space.accessible and not self.attributes.accessibility_eligibility) or
+            (space.reserved_type and self.attributes.permit_type!=(space.permit_requirement or space.reserved_type)))
+        self.log('SpaceClaimSucceeded',space=space,utility=utility);self.log('ParkingStarted',space=space,utility=utility)
 
-        self.model.event_logger.log("SpaceClaimAttempted", self.model.clock_s, agent=self, space=target)
-        if self.model.try_park(self, target.space_id):
-            return
-        self.lost_space_events += 1
-        self.rejected_spaces += 1
-        self.chosen_space_id = None
-        self.chosen_module = None
-        self.state = DriverState.SEARCHING
-        self.model.event_logger.log("LostSpace", self.model.clock_s, agent=self, space=target)
-
-    def _move_toward_destination(self) -> None:
-        dest_x, dest_y = self.attributes.destination
-        self._move_toward(dest_x, dest_y)
-
-    def _move_toward(self, dest_x: float, dest_y: float) -> bool:
-        dx = dest_x - self.x_m
-        dy = dest_y - self.y_m
-        distance = math.hypot(dx, dy)
-        if distance < 1e-9:
-            return True
-        step = min(self.model.search_speed_m_per_s * self.model.step_seconds, distance)
-        self.x_m += dx / distance * step
-        self.y_m += dy / distance * step
-        self.search_distance_m += step
-        self.path.append((self.x_m, self.y_m))
-        return step >= distance
-
-    def park_at(self, space: ParkingSpace, utility: float | None) -> None:
-        self.state = DriverState.PARKED
-        self.chosen_space_id = space.space_id
-        self.chosen_module = space.module_id
-        self.utility_of_chosen_action = utility
-        self.walking_distance_m = math.hypot(
-            space.x_m - self.attributes.destination_x_m,
-            space.y_m - self.attributes.destination_y_m,
-        )
-        self.x_m = space.x_m
-        self.y_m = space.y_m
-        self.parking_time_s = self.model.clock_s
-        self.path.append((self.x_m, self.y_m))
-        self.model.event_logger.log("SpaceClaimSucceeded", self.model.clock_s, agent=self, space=space, utility=utility)
-        self.model.event_logger.log("ParkingStarted", self.model.clock_s, agent=self, space=space, utility=utility)
-
-    def _start_walking_to_destination(self) -> None:
-        self.state = DriverState.WALKING_TO_DESTINATION
-        self.model.event_logger.log("WalkingToDestinationStarted", self.model.clock_s, agent=self)
-
-    def _start_exiting(self) -> None:
-        parked_space_id = self.chosen_space_id
-        if parked_space_id:
-            self.model.release_parking(self, parked_space_id)
-        self.state = DriverState.EXITING
-        self.model.event_logger.log("ParkingEnded", self.model.clock_s, agent=self, space_id=parked_space_id)
+    def _start_exiting(self):
+        if self.chosen_space_id:self.model.release_parking(self,self.chosen_space_id)
+        self.state=DriverState.EXITING;self.log('ParkingEnded',space_id=self.chosen_space_id)
+        exits=self.model.facility.exit_points
+        if exits:
+            ids=self.model.facility.exit_point_ids
+            index=ids.index(self.attributes.preferred_exit_id) if self.attributes.preferred_exit_id in ids else 0
+            node=self.model.navigation._node(exits[index])
+            self.route=self.model.navigation.route((self.x_m,self.y_m),node)
+        else:self.route=[]

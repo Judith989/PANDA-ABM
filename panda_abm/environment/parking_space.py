@@ -35,6 +35,10 @@ class ParkingSpace:
     unavailable: bool = False
     legal_restrictions: tuple[str, ...] = field(default_factory=tuple)
     network_node_id: str | None = None
+    distance_to_door_1_m: float | None = None
+    distance_to_door_2_m: float | None = None
+    distance_to_exit_a_m: float | None = None
+    distance_to_exit_b_m: float | None = None
 
     def is_compatible_with_vehicle(self, vehicle_type: str) -> bool:
         """Return whether a vehicle type can physically use this space.
@@ -93,4 +97,9 @@ def parking_space_from_lot_config_slot(slot: Mapping[str, object]) -> ParkingSpa
         accessible=bool(slot.get("is_accessible")),
         reserved_type="reserved" if bool(slot.get("is_reserved")) else None,
         unavailable=bool(slot.get("is_blocked")) or bool(slot.get("is_unavailable")),
+        price_per_hour=float(slot.get("price_per_hour", 0.0)),
+        distance_to_door_1_m=slot.get("distance_to_door_1_m"),
+        distance_to_door_2_m=slot.get("distance_to_door_2_m"),
+        distance_to_exit_a_m=slot.get("distance_to_exit_a_m"),
+        distance_to_exit_b_m=slot.get("distance_to_exit_b_m"),
     )
