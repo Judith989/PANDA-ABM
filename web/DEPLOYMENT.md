@@ -44,6 +44,7 @@ simulation implementation while leaving paper drafts and raw outputs out:
 ```powershell
 git add .gitattributes .gitignore .vercelignore vercel.json package.json README.md
 git add panda_abm data dashboard web scripts tests requirements.txt requirements-analysis.txt
+git add --renormalize panda_abm data/lot_config.json dashboard web/release
 git diff --cached --stat
 git commit -m "Prepare parking simulation platform for Vercel"
 git push origin main
@@ -54,6 +55,12 @@ be deselected if you do not intend to publish them. Do not use `git add .` for
 this initial release: the working tree also contains unpublished paper material.
 The commands above leave `paper/`, `research/`, raw results and temporary files
 out of the initial code commit.
+
+The renormalization step reapplies `.gitattributes` to already-tracked files.
+Without it, an older Git index entry can retain LF line endings while the
+tested local bundle contains CRLF, causing the Linux deployment's source
+integrity check to fail. This step preserves the tested bytes; it does not
+change simulation behavior.
 
 Do not commit `.env`, `.vercel/`, credentials, virtual environments, local Sites
 checkouts, `web/dist/`, temporary files or the downloaded scientific wheels.
