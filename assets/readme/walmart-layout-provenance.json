@@ -1,0 +1,76 @@
+{
+  "source": "Google Maps screenshot used in the earlier site review",
+  "source_sha256": "31800eba17ec0e9e6b34dc7613b656e5c3f85645fe85822f5ef1e82c27c60830",
+  "config_sha256": "6cd8d14592ed7590dfe0c00ddd96424d2dc2ab7a9525e36bed968a6d3ef250a4",
+  "image_size": [
+    1280,
+    720
+  ],
+  "projection": "Mercator interpolation from two manually read screenshot anchors",
+  "anchors": [
+    {
+      "lon": -105.541668,
+      "lat": 41.303614,
+      "pixel": [
+        550,
+        250
+      ]
+    },
+    {
+      "lon": -105.537377,
+      "lat": 41.301196,
+      "pixel": [
+        950,
+        550
+      ]
+    }
+  ],
+  "landmarks": [
+    {
+      "id": "door_1",
+      "label": "Door 1 (west)",
+      "lat": 41.302204,
+      "lon": -105.540912,
+      "image_x": 620.4730831970571,
+      "image_y": 424.9393172717165
+    },
+    {
+      "id": "door_2",
+      "label": "Door 2 (east)",
+      "lat": 41.302204,
+      "lon": -105.540166,
+      "image_x": 690.0139827549648,
+      "image_y": 424.9393172717165
+    },
+    {
+      "id": "exit_a",
+      "label": "Entry/Exit A (north)",
+      "lat": 41.303759,
+      "lon": -105.539582,
+      "image_x": 744.4535073416961,
+      "image_y": 232.00957202926247
+    },
+    {
+      "id": "exit_b",
+      "label": "Entry/Exit B (east)",
+      "lat": 41.302204,
+      "lon": -105.538031,
+      "image_x": 889.0351899325995,
+      "image_y": 424.9393172717165
+    }
+  ],
+  "simulated_layout": {
+    "slot_count": 1315,
+    "category_counts": {
+      "usable": 1072,
+      "accessible": 34,
+      "unavailable": 209
+    },
+    "aisle_count": 17,
+    "graph_nodes": 2659,
+    "graph_edges": 2672,
+    "network_source": "panda_abm.environment.navigation.AisleNetwork; runtime topology, including approach spurs",
+    "navigation_sha256": "9a23bbf576aa39a911b97652721b709fab05055d78cf4237d0bb99fd23c53627"
+  },
+  "note": "Estimated alignment, not a survey. Source pixels are plotted with scientific annotations; no aerial content is generated."
+}

@@ -1,5 +1,9 @@
 # PANDA Parking Simulation Lab
 
+**[Open the published website](https://panda-abm.vercel.app/)**
+
+![Published Cesium parking environment](../assets/readme/cesium-platform.jpg)
+
 The public platform combines a Cesium 3D scene, interactive simulations,
 matched information comparisons and saved study results. The original Python
 ABM executes in a Pyodide Web Worker on the visitor's device. The website
@@ -29,32 +33,20 @@ resample whole matched replications 10,000 times; they are exploratory pointwise
 not produce an uncertainty interval. Runs are held in the tab's memory; download
 results before closing it. At most four newly computed replays are retained.
 
-## Reproduce the local website
+## Preview the published website locally
 
-Install the repository requirements. The release was prepared with Mesa 3.5.1,
-NetworkX 3.7 and tqdm 4.70.1. Scientific browser wheels come from Pyodide 314.0.7.
-Browser and native Python/NumPy versions differ and are recorded in exports.
-From the repository root:
+Install Node.js 22. From the repository root, build the checked-in release and serve the static output with Python:
 
 ```powershell
-python scripts/download_browser_runtime.py
-python scripts/build_public_platform.py
-python scripts/benchmark_public_platform.py --fixtures-only
-python -m http.server 8765 --bind 127.0.0.1 --directory dashboard
+npm run build
+python -m http.server 8768 --bind 127.0.0.1 --directory web/dist
 ```
 
-Open http://127.0.0.1:8765/. CesiumJS and OpenStreetMap need internet access.
-The Python runtime and scientific wheels are served from the site's own assets.
-The build requires the prepared GLBs and reference replay. If they are absent,
-prepare them from the user's original model directory:
+Open [http://127.0.0.1:8768/](http://127.0.0.1:8768/). The release includes the two lot models, corrected configuration, saved replay, study summaries and verification fixtures. No original model folder, research archive, Python simulation server or Cesium ion token is required for this preview.
 
-```powershell
-python scripts/prepare_cesium_assets.py --source C:/Users/jnjoku/Documents/ABM-Parking
-python scripts/serve_dashboard.py --prepare-replay
-```
+The build downloads pinned Pyodide 314.0.7 runtime assets and checks their SHA-256 digests. CesiumJS and the OpenStreetMap basemap also need internet access. Native Python dependencies are required for command-line ABM experiments, not for browser-side simulation. Mesa 3.5.1, NetworkX 3.7 and tqdm 4.70.1 are included in the tested browser bundle; runtime versions are recorded in downloads.
 
-The legacy loopback server remains a developer API/replay utility. The public
-browser interface uses its worker engine and does not need that Python server.
+For release regeneration after code changes, follow [web/DEPLOYMENT.md](../web/DEPLOYMENT.md). That separate workflow requires the prepared research archives and model assets. The legacy loopback server in `scripts/serve_dashboard.py` remains a developer API/replay utility; the public website executes the ABM in its worker.
 
 ## Implementation and reproducibility
 
@@ -71,7 +63,7 @@ browser interface uses its worker engine and does not need that Python server.
   and repeated full-lifecycle timings for 20, 80 and 120 drivers.
 - `scripts/verify_platform_comparison.py` checks a browser-exported comparison
   against native execution, including every driver and paired estimates.
-- `paper/platform_evaluation/` contains the evaluation protocol and evidence.
+- `web/release/evaluation/` contains selected verification records and timing evidence included with the release.
 
 For native measurements run `python scripts/benchmark_public_platform.py`.
 For browser measurements use the performance button while keeping the tab
@@ -90,4 +82,4 @@ that transform. `dashboard/alignment.json` records the fit and config hash.
 
 The platform supports scenario-based decision support. It does not continuously
 assimilate observed occupancy or validate assumed behavior against field data.
-See `THIRD_PARTY.md` for dependencies and map attribution.
+See [THIRD_PARTY.md](THIRD_PARTY.md) for dependencies and map attribution.

@@ -1,0 +1,28 @@
+{
+  "description": "README illustrations copied from the reviewed layout, current results and deployed website; no new simulations.",
+  "production_url": "https://panda-abm.vercel.app/",
+  "deployment_commit": "7ddef5522195c3475979ddd213c7f6c55561b43f",
+  "config_sha256": "6cd8d14592ed7590dfe0c00ddd96424d2dc2ab7a9525e36bed968a6d3ef250a4",
+  "files": {
+    "cesium-platform.jpg": {
+      "source": "paper/platform_evaluation/vercel_production_3d.jpg",
+      "sha256": "b40f312423cc13ca958b8e7a9482b2112a979c115150daee568c28d0a2d7da3b"
+    },
+    "walmart-layout.png": {
+      "source": "paper/results_section/figures/walmart_simulated_layout.png",
+      "sha256": "f719a955f13e085318a23be6a6627396a18c6ea3c942af0539366378cf7c9a70"
+    },
+    "parking-model-comparison.png": {
+      "source": "paper/results_section/figures/five_policy_overview.png",
+      "sha256": "4164763f0082e0b0e94c1ae662cdaa8159ab1f3bc3e2349b6406278e73e3ea9a"
+    },
+    "parking-model-comparison.csv": {
+      "source": "paper/tables/complete/robustness_benchmark_cells.csv",
+      "sha256": "6942a5c744289ded8caccf5d7fed56b317bc48cb17744626464be3b1c1434359"
+    },
+    "walmart-layout-provenance.json": {
+      "source": "paper/results_section/figures/walmart_simulated_layout_provenance.json",
+      "sha256": "20036b70aa1bcc71f096da6e14d840a00037197156c7e4da83abcdda63e60aab"
+    }
+  }
+}
