@@ -6,7 +6,7 @@ Updated: 3 November 2026
 
 PANDA-ABM was developed as a parking agent-based research simulation using Python and Mesa.
 
-This guide describes the model components and provides commands for running synthetic examples, Walmart parking experiments, matched information comparisons, behavioral analysis and model audits.
+The steps below record how the model was built and checked. They also explain the files, commands and outputs needed to run simulations and examine their results.
 
 ## Public website
 
@@ -24,18 +24,6 @@ The website brings the Python ABM into a georeferenced Cesium 3D environment. Us
 The 3D scene uses the corrected lot configuration, with building and pavement models providing approximate visual context. It displays simulated conditions. Continuous updates from the physical facility remain future work.
 
 See the [platform guide](dashboard/README.md) for user workflows and the [deployment guide](web/DEPLOYMENT.md) for Vercel configuration. The checked-in release builds without private study archives, a Python backend or a Cesium ion token. Results are held in the browser tab's memory; download them before closing the tab.
-
-## Simulation capabilities
-
-The implementation supports:
-
-- synthetic and Walmart/PANDA parking environments
-- driver attributes, preferences, constraints and reference points
-- deterministic utility, random utility and cumulative prospect theory decisions
-- vehicle movement through parking aisles
-- unaided, aisle-level and space-level parking information
-- event logging, metrics, plots and experiment reports
-- a Cesium website for live simulations, saved replays and matched comparisons
 
 ## Installation
 
@@ -63,8 +51,6 @@ Open [http://127.0.0.1:8768/](http://127.0.0.1:8768/). This path uses the bundle
 
 ## Step 1: Core States And Parking Spaces
 
-These files established the simulation's physical objects and state labels.
-
 1. [panda_abm/core/states.py](panda_abm/core/states.py)
 
    This file defined the driver states used throughout a trip and the parking-space types used by the facility. Shared labels allowed the agent, event logger and analysis code to refer to the same states.
@@ -80,6 +66,7 @@ These files established the simulation's physical objects and state labels.
 1. [panda_abm/environment/coordinates.py](panda_abm/environment/coordinates.py)
 
    This file converted latitude and longitude into local coordinates measured in metres. The local coordinates were used for movement, visibility and distance calculations within the facility.
+
 The synthetic facility was used for small examples and software checks. The Walmart/PANDA environment was loaded from [data/lot_config.json](data/lot_config.json).
 
 The case study represented the Walmart Supercenter parking lot in Laramie, Wyoming. The store lay south of the main parking area. The main area contained long rows of parking spaces separated by driving aisles, and smaller parking groups extended along the sides of the building.
@@ -93,7 +80,7 @@ Slot coordinates were aligned to satellite imagery and reviewed visually. The la
 
 ![Estimated Walmart parking spaces and aisle network with Door 1, Door 2, Entry/Exit A and Entry/Exit B marked](assets/readme/walmart-layout.png)
 
-Door 1 and Door 2 represent the store entrances; A and B represent vehicle entry/exit points. Space markers and the connected aisle network follow the corrected configuration. Coordinates remain estimates. Satellite image: Google Maps, with branding and imagery attribution retained in the figure.
+The map shows the corrected space coordinates and simulated aisle network. Satellite image: Google Maps, with branding and imagery attribution retained.
 
 Each slot was assigned separate distances to Door 1, Door 2, Entry/Exit A and Entry/Exit B. These were stored as distance_to_door_1_m, distance_to_door_2_m, distance_to_exit_a_m and distance_to_exit_b_m. They represented straight-line distances; vehicle movement followed the aisle network.
 
@@ -104,8 +91,6 @@ python scripts/update_lot_distances.py
 ~~~
 
 ## Step 2: Driver Attributes, Preferences And Populations
-
-This step created the drivers who used the facility.
 
 1. [panda_abm/behavior/population.py](panda_abm/behavior/population.py)
 
@@ -130,13 +115,10 @@ This step created the drivers who used the facility.
 1. [panda_abm/behavior/factory.py](panda_abm/behavior/factory.py)
 
    This file provided the entry points for creating reproducible populations and controlled comparison populations. It connected population specifications, behavioral parameters and reference points to the driver setup used by the simulation.
-A driver's attributes included arrival time, destination, vehicle type, familiarity, eligibility, permit status and walking limits. Preferences determined the importance of walking, price, search, availability, rule risk, exit proximity and other implemented features.
 
 Population specifications can be saved and reused so that different decision models and information conditions receive the same drivers.
 
 ## Step 3: Perception, Information And Choice Sets
-
-This step determined what drivers knew and which spaces they could consider.
 
 1. [panda_abm/environment/perception.py](panda_abm/environment/perception.py)
 
@@ -149,6 +131,7 @@ This step determined what drivers knew and which spaces they could consider.
 1. [panda_abm/environment/choice_set.py](panda_abm/environment/choice_set.py)
 
    This file filtered observed or reported spaces into the offers a driver could consider. The checks covered perceived availability, vehicle compatibility, accessibility eligibility, reserved-space permission and walking-distance limits.
+
 Three information conditions were implemented:
 
 | Command-line value | Driver information and search behavior |
@@ -159,7 +142,7 @@ Three information conditions were implemented:
 
 Reports described occupancy at the time they were received. Drivers still travelled to a chosen space and attempted a claim on arrival. A free-space report did not reserve the space.
 
-Select the information condition with `--information-mode`. The implementation is documented in [panda_abm/environment/information.py](panda_abm/environment/information.py) and [panda_abm/environment/perception.py](panda_abm/environment/perception.py).
+Select the information condition with `--information-mode`.
 
 ## Step 4: Decision Models
 
@@ -173,7 +156,7 @@ Implementation: [panda_abm/behavior/decision/deterministic.py](panda_abm/behavio
 
 ### M1: Stochastic Utility
 
-The random utility model used softmax choice probabilities. Higher-utility spaces were more likely to be selected; the sampled offer was checked against the acceptance threshold.
+The stochastic utility model used softmax choice probabilities. Higher-utility spaces were more likely to be selected; the sampled offer was checked against the acceptance threshold.
 
 Implementation: [panda_abm/behavior/decision/random_utility.py](panda_abm/behavior/decision/random_utility.py).
 
@@ -192,7 +175,6 @@ The linear-CPT control removes nonlinear value and probability transformations w
 The simple-search control chooses the feasible local space with the shortest estimated approach. It considers reported remote spaces when no feasible local space is available. Its implementation is in [panda_abm/simulation/tcss_conditions.py](panda_abm/simulation/tcss_conditions.py).
 
 The website exposes the three primary decision models. The two additional controls are used by the research experiment scripts.
-
 
 ## Step 5: Aisle Search, Movement And Timing
 
@@ -246,8 +228,6 @@ Search time was measured from search start to parking or abandonment. It include
 1. [panda_abm/simulation/runner.py](panda_abm/simulation/runner.py)
 
    This file ran the selected decision models across repetitions and saved the outputs. It connected the facility, population, simulation settings, metric collection, summary tables, standard plots and JSON exports.
-The driver-level outputs recorded parking success or abandonment, elapsed search, walking distance, chosen space, rejected offers and failed claims. Unobserved walking was left missing when a driver did not park.
-
 ## Step 7: Run The Synthetic Demo
 
 Start with the small synthetic environment to check the simulation-to-output pipeline:
@@ -305,7 +285,7 @@ The report script created summary tables, paired seed-level intervals, competiti
 
 ![Current comparison of search duration, walking distance and parking success across five parking policies](assets/readme/parking-model-comparison.png)
 
-The illustration shows the three primary models and the linear-CPT and simple-search controls at 80% and 95% initial occupancy. Markers show condition means; search includes all arrivals, while walking includes parked drivers. This replaces the earlier pilot image. The [figure data and provenance](assets/readme/README.md) are included in the repository.
+The illustration shows the three primary models and the linear-CPT and simple-search controls at 80% and 95% initial occupancy. Markers show condition means; search includes all arrivals, while walking includes parked drivers. The figure comes from the versioned study, which included the two additional controls. The [figure data and provenance](assets/readme/README.md) are included in the repository.
 
 A smaller custom run:
 
@@ -334,29 +314,65 @@ The analysis uses training and held-out seeds, checks grouping stability and pre
 
 The earlier continuous-population campaign remains available in `scripts/run_continuous_population_study.py` and `scripts/analyze_continuous_population.py`. Its outputs belong to that campaign and should not be pooled with the final study.
 
-## Step 11: Run Stress Tests And Model Audits
+## Step 11: Model Verification And Stress Testing
 
-The publication audit separated simulation checks, crowded-lot sensitivity, decision mechanisms and claim-probability diagnostics.
+The model was checked in stages during development: automated tests covered individual rules, stress tests examined demanding conditions, and audits examined decision mechanisms and availability beliefs. These checks assess the simulation's implementation and assumptions; they do not replace comparison with observed driver behavior.
+
+### Automated tests
+
+Run the test suite before starting experiments:
+
+~~~powershell
+python -m pytest tests -q
+~~~
+
+The tests check parking restrictions, decision calculations, search timing, occupancy claims, information handling and population generation.
+
+### Development audits
+
+Use a fresh output folder and pass the same folder to all five commands below. The first four scripts generate the audit data; the last script assembles the report.
+
+**Simulation checks:** examine repeatability, timing, parking rules and sensitivity to model settings.
 
 ~~~powershell
 python scripts/publication_stress_audit.py --output results/audit_reproduction
+~~~
+
+**Crowded-lot stress tests:** extend the checks to higher demand and longer shopping stays.
+
+~~~powershell
 python scripts/publication_pressure_audit.py --output results/audit_reproduction
+~~~
+
+**Decision-mechanism checks:** examine how behavioral assumptions affect decisions and test whether profile analysis can find groups in data that contain no distinct driver types.
+
+~~~powershell
 python scripts/publication_mechanism_audit.py --output results/audit_reproduction
+~~~
+
+**Availability-belief checks:** compare the assumed chance of acquiring a space with claim outcomes inside the simulation.
+
+~~~powershell
 python scripts/publication_claim_calibration.py --output results/audit_reproduction
+~~~
+
+**Audit report:** combine the checks, tables and figures. This report also recalculates walking summaries from the earlier continuous-population study. It requires that study at `results/continuous_population_20261027/`, or its `model_summary.csv` and `drivers.csv` copied into `results/audit_reproduction/historical_inputs/`. These files are needed for the report's historical correction, not for the four audit commands above.
+
+~~~powershell
 python scripts/report_publication_audit.py --output results/audit_reproduction
 ~~~
 
-The historical summary-correction part of the audit report also needs the earlier continuous study or the archived historical_inputs/ directory copied into the audit output folder.
+### Versioned research experiments
 
-The versioned study scripts provide further controlled comparisons:
+Later experiments extended the audit work to matched information comparisons and operating conditions:
 
-- [scripts/verify_tcss_mechanisms.py](scripts/verify_tcss_mechanisms.py) independently checks utility and CPT calculations before a versioned experiment batch.
-- [scripts/run_tcss_first_batch.py](scripts/run_tcss_first_batch.py) evaluates the primary models, linear-CPT control and preference-variation controls under matched conditions.
+- [scripts/verify_tcss_mechanisms.py](scripts/verify_tcss_mechanisms.py) independently checks utility and CPT calculations before an experiment batch.
+- [scripts/run_tcss_first_batch.py](scripts/run_tcss_first_batch.py) compares the primary models, linear-CPT control and preference-variation controls.
 - [scripts/report_tcss_first_batch.py](scripts/report_tcss_first_batch.py) checks the saved archive and calculates paired summaries.
-- [scripts/run_tcss_robustness.py](scripts/run_tcss_robustness.py) evaluates simple search, mixed information adoption, delayed reports, background departures, synthetic layout transfer and simulation time steps.
-- [panda_abm/simulation/tcss_conditions.py](panda_abm/simulation/tcss_conditions.py) implements those additional conditions without changing the default core-model rules.
+- [scripts/run_tcss_robustness.py](scripts/run_tcss_robustness.py) examines simple search, mixed information adoption, delayed reports, background departures, a synthetic layout and simulation time steps.
+- [panda_abm/simulation/tcss_conditions.py](panda_abm/simulation/tcss_conditions.py) implements those additional conditions.
 
-These historical campaign runners require their versioned research documentation and control archives at the paths specified in the scripts. The complete research archive is not part of this website release. For new matched experiments from the public repository, use Step 9 or the website's **Matched comparisons** tab. The release includes the saved primary-study summaries in [web/release/study-results.json](web/release/study-results.json).
+These campaign scripts use the versioned documentation and control archives specified in their source files. The full research archive is separate from the website release. For new comparisons, use Step 9 or the website. Saved primary-study summaries are included in [web/release/study-results.json](web/release/study-results.json).
 
 ## Step 12: Digital-Twin And Cesium Exports
 
@@ -370,9 +386,9 @@ event_exports/    Event streams
 state_exports/    Final simulation states
 ~~~
 
-The [Cesium platform](dashboard/README.md) displays the corrected 3D lot and supports live simulations, replay inspection, matched information comparisons and downloads. The existing Python ABM executes in a browser worker through Pyodide. Saved study results are shown separately from new exploratory comparisons. Synchronization with observed operational data remains future work.
+The [platform guide](dashboard/README.md) explains the website workflows. The files below connect the Python simulation to the Cesium scene and browser controls.
 
-Use the local website instructions under **Installation** to preview exactly what is deployed. Rebuilding the research release is a separate workflow described in [web/DEPLOYMENT.md](web/DEPLOYMENT.md); it requires the original study archives and prepared model assets.
+See [web/DEPLOYMENT.md](web/DEPLOYMENT.md) for release preparation and deployment. Rebuilding research assets requires the original study archives and prepared model files.
 
 The browser-facing implementation is organized as follows:
 
@@ -427,7 +443,7 @@ The [README illustration index](assets/readme/README.md) records the source and 
 
 ## Main Metrics
 
-Metrics were derived from logged events by [panda_abm/metrics/collector.py](panda_abm/metrics/collector.py). The general runner saved driver-level metrics in raw/agents/agent_metrics.csv and summaries in tables/model_comparison.csv. The dedicated information study saved drivers.csv, runs.csv and reporting tables in its output directory.
+[panda_abm/metrics/collector.py](panda_abm/metrics/collector.py) derives metrics from logged events. The output folders above contain driver records and experiment summaries.
 
 ### Driver Outcomes
 
@@ -463,13 +479,3 @@ The general summaries reported success rate, abandonment rate, mean/median/90th-
 The matched information report also separated search time for all arrivals from search time among parked drivers. It reported intended-exit distance among parked drivers, failed claims per driver, selected-space agreement, target competition, and outcomes by mobility constraints, destination door and intended exit. Exit distance represented straight-line proximity to the intended access point, rather than the time required to drive out.
 
 Paired contrasts were calculated as differences within matched seeds, with 95% seed-bootstrap intervals. Walking and exit-distance contrasts were conditional on parking, so they were interpreted alongside success and abandonment rather than as outcomes for every arrival.
-
-## Verify The Code
-
-Run the test suite before experiments:
-
-~~~powershell
-python -m pytest tests -q
-~~~
-
-Tests cover domain rules, decision calculations, search timing, resource claims, information boundaries, population generation and analysis safeguards.
