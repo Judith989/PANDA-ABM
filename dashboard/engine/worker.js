@@ -13,24 +13,28 @@ async function initialize(){
   if(digest!==manifest.bundle_sha256)throw Error('Simulation source integrity check failed. Reload the site.');
   python.unpackArchive(source,'zip',{extractDir:'/work'});
   python.globals.set('_report',(done,total,model,information,seed)=>self.postMessage({type:'comparison-progress',done,total,model,information,seed}));
-  await python.runPythonAsync(`import sys,json\nsys.path.insert(0,'/work')\nfrom panda_abm.twin.replay import LiveSimulation,record_run\nfrom panda_abm.twin.platform import simulate,compare,runtime_versions\n_live=None`);
+  await python.runPythonAsync(`import sys,json\nsys.path.insert(0,'/work')\nfrom panda_abm.twin.replay import LiveSimulation,record_run\nfrom panda_abm.twin.platform import simulate,compare,runtime_versions\nfrom panda_abm.twin.environments import validate_environment\n_live=None`);
   const runtime=JSON.parse(python.runPython('json.dumps(runtime_versions())'));
   self.postMessage({type:'ready',runtime,initialize_ms:performance.now()-start,manifest});
 }
-self.onmessage=async({data:{id,method,payload}})=>{
+let operations=Promise.resolve();
+self.onmessage=event=>{operations=operations.then(()=>handle(event));};
+async function handle({data:{id,method,payload}}){
   try{
     ready??=initialize();await ready;python.globals.set('_payload_json',JSON.stringify(payload??{}));
     const code={
       ready:'json.dumps(runtime_versions())',
+      validate_environment:'json.dumps(validate_environment(json.loads(_payload_json)),allow_nan=False)',
       summary:'json.dumps(simulate(json.loads(_payload_json)),allow_nan=False)',
       compare:'json.dumps(compare(json.loads(_payload_json),_report),allow_nan=False)',
       record:'json.dumps(record_run(json.loads(_payload_json)),allow_nan=False)',
       live:"_live=LiveSimulation(json.loads(_payload_json))\n_result=json.dumps(_live.describe(),allow_nan=False)",
       advance:"_result=json.dumps(_live.advance(json.loads(_payload_json)['seconds']),allow_nan=False)",
+      intervene:"_result=json.dumps(_live.intervene(json.loads(_payload_json)),allow_nan=False)",
       close:"_live=None\n_result=json.dumps({'closed':True})"
     }[method];
     if(!code)throw Error('Unknown simulation operation');
     const result=await python.runPythonAsync(code);
     self.postMessage({id,result:JSON.parse(result??python.globals.get('_result'))});
-  }catch(error){self.postMessage({id,error:String(error)});}
+  }catch(error){let message=String(error);if(method==='validate_environment'){const lines=message.split('\n').filter(line=>/^(?:ValueError|TypeError|KeyError):/.test(line.trim()));message=lines.length?lines.at(-1).replace(/^[^:]+:\s*/, ''):'Invalid environment. Check the JSON structure and required fields.';}self.postMessage({id,error:message});}
 };

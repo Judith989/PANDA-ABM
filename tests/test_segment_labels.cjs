@@ -1,0 +1,14 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('dashboard/app.js','utf8');const config=JSON.parse(fs.readFileSync('data/lot_config.downtown_laramie.json','utf8'));
+const elements=new Map(),el=id=>{if(!elements.has(id))elements.set(id,{checked:true,textContent:''});return elements.get(id)};
+let flown,scrolled=false;const added=[];
+const context={state:{scene:{config},run:{aisles:{street_2_1:[[0,0],[0,100]]}}},window:{},$:el,esc:String,updateCameraFollow(){},local:(x,y,z)=>({x,y,z}),viewer:{entities:{add:e=>(added.push(e),e),remove(){}},camera:{flyToBoundingSphere:(sphere,options)=>flown={sphere,options}}},C:{Color:{YELLOW:'yellow',WHITE:'white',BLACK:{withAlpha:()=>({})}},BoundingSphere:class{constructor(center,radius){this.center=center;this.radius=radius}},HeadingPitchRange:class{constructor(...args){this.args=args}}},document:{querySelector:()=>({scrollIntoView(){scrolled=true}})}};
+vm.runInNewContext(source.slice(source.indexOf('function segmentInfo('),source.indexOf('function updateTraffic(')),context);
+assert.equal(context.segmentInfo('street_2_1').label,'South 3rd Street — East Grand Avenue to East Garfield Street');
+assert.equal(context.segmentInfo('cross_0_1').road_name,'East Ivinson Avenue');
+assert.equal(context.segmentInfo('street_1_1').road_name,'South 2nd Street');
+assert.equal(context.segmentInfo('unknown',{},{}).label,'unknown');
+const legacy={meta:{lot_name:'Downtown Laramie — old run'}};assert.match(context.segmentInfo('street_2_1',legacy,{}).label,/South 3rd Street/);
+context.focusTrafficSegment('street_2_1');assert(flown&&scrolled);assert.equal(added.length,2);assert.equal(el('follow-driver').checked,false);assert.match(el('inspection').textContent,/street_2_1/);
+assert.match(context.segmentLink('street_2_1'),/data-traffic-segment="street_2_1"/);
+console.log('Named segments, legacy fallback, report links and map-focus calls passed.');

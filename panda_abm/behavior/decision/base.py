@@ -38,6 +38,7 @@ class DecisionContext:
     preferred_exit_id: str | None = None
     search_speed_m_per_s: float = 5.0
     max_walking_distance_m: float | None = None
+    walking_distances_m: dict[str, float] = field(default_factory=dict)
     approach_times_s: dict[str, float] = field(default_factory=dict)
     availability_probabilities: dict[str, float] = field(default_factory=dict)
     decision_interval_s: float = 10.0

@@ -2,7 +2,7 @@
 window.PandaEngine=class {
   constructor(onEvent=()=>{}){this.onEvent=onEvent;this.pending=new Map();this.sequence=0;this.start();}
   start(){
-    this.worker=new Worker('engine/worker.js?v=20261102r4',{type:'module'});
+    this.worker=new Worker('engine/worker.js?v=20261105r1',{type:'module'});
     this.worker.onmessage=({data})=>{
       if(data.type){this.onEvent(data);return;}
       const call=this.pending.get(data.id);if(!call)return;this.pending.delete(data.id);

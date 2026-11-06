@@ -1,5 +1,6 @@
 """Public-platform adapters and paired summaries; decision logic lives in core."""
 from __future__ import annotations
+from panda_abm.twin.environments import traffic_segment_labels
 
 import hashlib
 import json
@@ -8,6 +9,7 @@ import time
 import numpy as np
 from panda_abm.core.states import DriverState
 from panda_abm.twin.replay import build_replay_model, ROOT
+from panda_abm.twin.time_window import run_window, window_status, window_summary
 
 
 def digest(value):
@@ -27,9 +29,10 @@ def simulate(settings, include_population=False):
     initial = sorted(sid for sid, state in model.space_states.items() if state.occupied)
     population_hash = digest(population.as_dict())
     initialized = time.perf_counter()
-    model.run_until_complete()
+    horizon=settings['simulation_duration_s']
+    run_window(model,horizon)
     agents = sorted(model.agents, key=lambda a: a.driver_id)
-    if not all(a.state in (DriverState.LEFT, DriverState.ABANDONED) for a in agents):
+    if horizon is None and not all(a.state in (DriverState.LEFT, DriverState.ABANDONED) for a in agents):
         raise RuntimeError('Simulation exceeded its completion bound')
     outcomes = []
     for a in agents:
@@ -39,18 +42,41 @@ def simulate(settings, include_population=False):
             chosen_space=a.chosen_space_id if success else None,
             search_s=a.search_time_s, search_distance_m=a.search_distance_m,
             walk_m=a.walking_distance_m if success else None,
-            exit_distance_m=getattr(slot, f'distance_to_{a.attributes.preferred_exit_id}_m', None) if slot else None,
+            exit_distance_m=slot.exit_distance(a.attributes.preferred_exit_id) if slot else None,
             lost_claims=a.lost_space_events, parking_time_s=a.parking_time_s))
     parked = [o for o in outcomes if o['success']]
+    if model.traffic:
+        for a,o in zip(agents,outcomes):
+            entry=max(0.,(a.search_started_s if a.search_started_s is not None else model.clock_s)-a.arrival_time_s)
+            o.update(entry_delay_s=entry,traffic_delay_s=getattr(a,'traffic_delay_s',0.),
+                     arrival_to_search_end_s=entry+a.search_time_s)
+    if horizon is not None:
+        for a,o in zip(agents,outcomes):
+            o.update(window_status(a,model.clock_s))
+            if model.traffic:o['arrival_to_search_end_s']=o['entry_delay_s']+o['search_s']
     mean = lambda rows, key: float(np.mean([r[key] for r in rows])) if rows else None
     metrics = dict(search_s=mean(outcomes, 'search_s'), success_pct=100 * len(parked) / len(outcomes),
                    walk_m=mean(parked, 'walk_m'), exit_m=mean(parked, 'exit_distance_m'),
                    failed_claims=mean(outcomes, 'lost_claims'))
-    result=dict(settings=settings, metrics=metrics, outcomes=outcomes,
+    if horizon is not None:
+        cohort=[o for o in outcomes if o['observed_arrival']]
+        metrics.update(search_s=mean(cohort,'search_s'),
+                       success_pct=100*len(parked)/len(cohort) if cohort else None,
+                       failed_claims=mean(cohort,'lost_claims'))
+    result=dict(segment_labels=traffic_segment_labels(facility,model.navigation),settings=settings, metrics=metrics, outcomes=outcomes,
                 population_sha256=population_hash, initial_occupancy_sha256=digest(initial),
-                config_sha256=hashlib.sha256((ROOT/'data/lot_config.json').read_bytes()).hexdigest(),
+                config_sha256=(settings['environment']['config_sha256'] if settings['environment'] else hashlib.sha256((ROOT/'data/lot_config.json').read_bytes()).hexdigest()),
+                environment_sha256=settings['environment']['environment_sha256'] if settings['environment'] else None,
                 simulated_duration_s=model.clock_s, initialize_wall_s=initialized-start,
                 wall_s=time.perf_counter()-start)
+    from panda_abm.core.interventions import supply_snapshot
+    result.update(supply=supply_snapshot(model), interventions=model.intervention_log,
+                  traffic=model.traffic.snapshot() if model.traffic else dict(enabled=False))
+    from panda_abm.twin.urban_scenarios import urban_outcomes
+    result['urban_outcomes']=urban_outcomes(model)
+    result['walking_measure']='pedestrian_network' if facility.pedestrian_network else 'euclidean'
+    result['through_traffic']=model.through_traffic.snapshot()
+    if horizon is not None:result.update(window_summary=window_summary(model),termination_reason='time_limit')
     if include_population:result['population']=population.as_dict()
     return result
 
@@ -126,6 +152,8 @@ def compare(payload, progress=None):
                 if seed in fingerprints and fingerprints[seed] != key:
                     raise RuntimeError('Matched population or initial occupancy differs between conditions')
                 fingerprints[seed] = key
+                if settings['environment'] is not None:
+                    row['settings']=row['settings'] | dict(environment=None,environment_sha256=settings['environment']['environment_sha256'])
                 runs.append(row)
                 if progress:
                     progress(len(runs), reps*len(models)*3, name, info, seed)

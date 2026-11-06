@@ -4,24 +4,76 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>PANDA · Parking simulation platform</title>
   <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.127/Build/Cesium/Widgets/widgets.css">
-  <link rel="stylesheet" href="style.css?v=20261102r6">
-  <link rel="stylesheet" href="platform.css?v=20261102r6">
+  <link rel="stylesheet" href="style.css?v=20261105r7">
+  <link rel="stylesheet" href="platform.css?v=20261105r1">
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.127/Build/Cesium/Cesium.js" defer></script>
-  <script src="engine/client.js?v=20261102r6" defer></script>
-  <script src="platform.js?v=20261102r6" defer></script>
-  <script src="app.js?v=20261102r6" defer></script>
+  <script src="engine/client.js?v=20261105r1" defer></script>
+  <script src="platform.js?v=20261105r7" defer></script>
+  <script src="environments.js?v=20261105r1" defer></script>
+  <script src="motion.js?v=20261105r2" defer></script>
+  <script src="pedestrians.js?v=20261105r6" defer></script>
+  <script src="follow-camera.js?v=20261105r4" defer></script>
+  <script src="app.js?v=20261105r9" defer></script>
 </head>
 <body>
   <header><a class="brand" href="./">P<span>▰</span>NDA<span class="brand-sub">PARKING SIMULATION LAB</span></a><div class="site">Walmart Supercenter <span> / Laramie, Wyoming</span></div><span class="badge">RESEARCH PLATFORM</span></header>
   <nav class="platform-nav" aria-label="Platform"><button data-page="simulate" aria-current="page">3D simulation</button><button data-page="compare">Matched comparisons</button><button data-page="study">Study results</button><button data-page="about">About &amp; performance</button><span id="engine-status" role="status">Python engine loads when needed</span></nav>
   <main>
     <aside class="controls">
-      <div class="eyebrow">EXPERIMENT WORKSPACE</div><h1>Explore parking<br>decisions.</h1><p class="intro">One lot. Different information.<br>Watch individual choices unfold.</p>
+      <div class="eyebrow">EXPERIMENT WORKSPACE</div><h1>Explore parking<br>decisions.</h1><p class="intro">Different lots. Different experiments.<br>Watch individual choices unfold.</p>
+      <section class="environment-tools" aria-label="Environment library">
+        <label for="environment-select">Environment</label><select id="environment-select"></select>
+        <p id="environment-status" class="help" role="status">Walmart is the reference environment. Synthetic geometry is illustrative.</p>
+        <details><summary>Import a 3D environment</summary>
+          <p class="help">Files stay on your device. Use local metres, two doors and two paired vehicle access points. Supply a connected aisle network; download the template for its schema.</p>
+          <a class="text-button" href="assets/downtown-synthetic.zip" download>Download downtown test environment (ZIP)</a>
+          <button type="button" class="text-button" id="environment-template">Download lot JSON template</button>
+          <label for="environment-json">Lot / environment JSON</label><input id="environment-json" type="file" accept=".json,application/json">
+          <label for="environment-models">3D models (self-contained GLB, optional)</label><input id="environment-models" type="file" accept=".glb" multiple>
+          <p class="help">Up to 8 models, 100 MB each and 200 MB total. Export models in metres with embedded textures. JSON geometry drives the simulation; meshes provide visual context.</p>
+          <button type="button" class="secondary" id="preview-environment">Validate and preview</button>
+          <div id="alignment-preview" hidden>
+            <p class="help">Adjust only the visual models. Space coordinates and driving routes stay fixed.</p>
+            <label for="env-east_m">Model east offset (m)</label><input type="number" id="env-east_m" value="0" step="0.1">
+            <label for="env-north_m">Model north offset (m)</label><input type="number" id="env-north_m" value="0" step="0.1">
+            <label for="env-height_m">Model height offset (m)</label><input type="number" id="env-height_m" value="0" step="0.1">
+            <label for="env-rotation">Model rotation (degrees)</label><input type="number" id="env-rotation" value="0" step="0.1">
+            <label for="env-scale">Model scale</label><input type="number" id="env-scale" value="1" min="0.0001" max="10000" step="0.01">
+            <label for="env-up">Model up axis</label><select id="env-up"><option>Y</option><option>Z</option></select>
+            <label for="env-forward">Model forward axis</label><select id="env-forward"><option>X</option><option>Z</option></select>
+            <button type="button" class="secondary" id="update-alignment">Apply alignment preview</button>
+            <label><input id="alignment-confirmed" type="checkbox"> I checked the model, spaces, doors and aisle connections</label>
+            <button type="button" class="secondary" id="confirm-environment" disabled>Use this environment</button>
+            <button type="button" class="text-button" id="cancel-environment">Cancel import</button>
+          </div>
+        </details>
+        <button type="button" class="text-button" id="export-environment">Download environment configuration</button>
+      </section>
       <form id="scenario">
         <label for="model">Decision model</label><select id="model" name="model"><option value="cpt">CPT · Prospect theory</option><option value="deterministic">M0 · Deterministic utility</option><option value="rum">M1 · Random utility</option></select>
         <label for="information">Parking information</label><div class="segmented" id="info-buttons"><button type="button" data-mode="unaided" class="selected">Unaided</button><button type="button" data-mode="aisle">Aisle</button><button type="button" data-mode="space">Space</button></div><input type="hidden" id="information" value="unaided"><p id="info-help" class="help">Drivers observe nearby spaces and search the aisles.</p>
         <label for="occupancy">Initial occupancy <strong id="occupancy-value">40%</strong></label><input id="occupancy" type="range" min="0" max="100" step="5" value="40">
-        <div class="form-row"><div><label for="population">Drivers</label><input id="population" type="number" min="1" max="120" value="80" required></div><div><label for="arrivals">Arrival gap (s)</label><input id="arrivals" type="number" min="1" max="120" value="20" required></div></div>
+        <label for="supply-mode">Initial supply</label><select id="supply-mode"><option value="percentage">Occupancy percentage</option><option value="count">Exact empty-space count</option><option value="pick">Choose occupied spaces on map</option></select>
+        <label id="free-count-label" for="free-count"><span id="supply-count-label">Empty spaces</span> <span id="picked-count"></span></label><input id="free-count" type="number" min="0" max="1106" value="5">
+        <p id="initial-supply-summary" class="help" role="status"></p>
+        <label for="map-action">Map click action</label><select id="map-action"><option value="inspect">Inspect driver / space</option><option value="occupied">Toggle initial occupied space</option><option value="closed">Toggle initial closure</option></select>
+        <button type="button" class="text-button" id="clear-selection">Clear selected spaces and closures</button>
+        <p class="help" id="supply-help">Exact empty-space count: 0 means a full lot. Map selection starts at 0% occupancy: only clicked spaces start occupied. Click again to clear a space.</p>
+        <label><input id="traffic-enabled" type="checkbox" checked> Model vehicle following and junction queues</label><p class="help">Traffic interactions are enabled for new scenarios. The saved research replay uses independent movement. The traffic model is experimental and uncalibrated. Traffic settings are included in downloads.</p>
+        <details><summary>Supply changes during a simulation</summary><p class="help">Inspect a usable space, then close, reopen, or release its background vehicle. Closing an occupied space prevents reuse after departure.</p>
+          <div class="form-row"><button type="button" class="secondary" data-intervention="close">Close selected</button><button type="button" class="secondary" data-intervention="open">Reopen selected</button></div><button type="button" class="secondary" data-intervention="release">Release background vehicle</button>
+          <label for="intervention-time">Schedule at simulated second</label><input type="number" id="intervention-time" value="120" min="0" max="86400"><label for="intervention-action">Scheduled action</label><select id="intervention-action"><option value="release">Release background vehicle</option><option value="close">Close space</option><option value="open">Reopen space</option></select><button type="button" class="text-button" id="schedule-intervention">Add selected space to schedule</button><button type="button" class="text-button" id="clear-schedule">Clear schedule</button><div id="intervention-list" class="help">No scheduled changes.</div></details>
+        <div class="form-row"><div><label for="population">Drivers</label><input id="population" type="number" min="1" max="1200" value="80" required></div><div><label for="arrivals">Arrival gap (s)</label><input id="arrivals" type="number" min="1" max="3600" value="20" required></div></div>
+        <label for="visit-profile">Activity duration</label><select id="visit-profile"><option value="baseline">Original baseline · 15–60 min</option><option value="short">Short · 15–60 min</option><option value="near_limit">Near limit · 90–120 min</option><option value="long">Long · 150–240 min</option><option value="mixed">Mixed · equal short / near-limit / long probabilities</option></select>
+        <label for="parking-policy">Parking time-limit policy</label><select id="parking-policy"><option value="configured">Configured space limits</option><option value="unrestricted">No time limits · counterfactual</option><option value="street_2h">Two hours on classified street spaces</option></select><p class="help">Compliance uses planned activity plus both walks. Fines, overstaying and relocation are not modeled.</p>
+        <label for="demand-duration">Parking arrivals</label><select id="demand-duration"><option value="count">Use driver count</option><option value="3600">Continue arrivals for 1 hour</option><option value="7200">Continue arrivals for 2 hours</option><option value="14400">Continue arrivals for 4 hours</option><option value="21600">Continue arrivals for 6 hours</option></select><p class="help">Continuous demand derives the driver count from duration and arrival gap, up to 1,200 drivers.</p>
+        <label for="background-departures">Initially parked vehicles</label><select id="background-departures"><option value="static">Stay parked · original baseline</option><option value="residual">Leave after assumed remaining stays</option></select><p class="help">Remaining stays follow the activity profile, capped by configured time limits. Background releases free spaces without adding departure vehicles to traffic.</p>
+        <label for="through-traffic">Through traffic</label><select id="through-traffic"><option value="off">Off</option><option value="low">Low · 30 vehicles/hour</option><option value="medium">Medium · 120 vehicles/hour</option><option value="high">High · 240 vehicles/hour</option></select>
+        <label for="through-demand">Through-traffic arrival period</label><select id="through-demand"><option value="3600">1 hour</option><option value="7200">2 hours</option><option value="14400">4 hours</option><option value="21600">6 hours</option></select><p class="help">Assumed rates, not measured downtown counts. Through vehicles share traffic interactions but never seek parking.</p>
+        <label for="simulation-duration">Simulation duration</label><select id="simulation-duration"><option value="full">Until all drivers finish</option><option value="600">10 minutes</option><option value="1200">20 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="14400">4 hours</option><option value="21600">6 hours</option><option value="custom">Custom duration</option></select>
+        <div id="custom-duration-container" hidden><label for="custom-duration-min">Custom duration (minutes)</label><input id="custom-duration-min" type="number" min="1" max="360" step="1" value="10" disabled required></div>
+        <p class="help">Applies to the next simulation. Driver count and arrival gap still set demand. Each driver keeps the existing 10-minute search limit. Unfinished searches are reported at the cutoff.</p>
+        <button class="secondary" id="pause-live" type="button" disabled>Pause simulation</button><p id="simulation-window-status" class="help" role="status"></p>
         <label for="seed">Random seed</label><input id="seed" type="number" min="0" max="2147483647" value="1000" required><p class="help">Reuse the seed and trip settings for matched comparisons.</p>
         <button class="primary" id="live-button" type="button">Start live simulation <span>↗</span></button>
         <button class="secondary" id="run-button" type="submit">Compute a saved replay</button>
@@ -29,16 +81,18 @@
       <div id="job-status" role="status" aria-live="polite">Loading the saved reference run…</div>
       <div class="section-label">SAVED RUNS</div><select id="history" aria-label="Select saved run"></select>
       <button id="download" class="text-button">↓ Download selected run</button>
-      <details><summary>Geometry &amp; alignment</summary><p id="alignment-note"></p><label><input type="checkbox" id="show-context" checked> Show 3D building &amp; pavement</label><label><input type="checkbox" id="show-network" checked> Show inferred aisle network</label><p class="help">Space markers use corrected lot coordinates. Building and pavement alignment remains approximate.</p></details>
+      <details id="module-list-panel" hidden><summary>Parking modules</summary><p class="help">Letters on the map identify parking modules. Click a letter or a module below to highlight it. Driving aisles may serve several modules.</p><div id="module-list"></div></details>
+      <details><summary>Geometry &amp; alignment</summary><p id="alignment-note"></p><label><input type="checkbox" id="show-context" checked> Show 3D building &amp; pavement</label><label><input type="checkbox" id="show-module-labels" checked> Show parking module labels</label><label><input type="checkbox" id="show-network" checked> Show inferred aisle network</label><p class="help">Space markers use corrected lot coordinates. Building and pavement alignment remains approximate.</p></details>
       <div class="footnote">Runs execute on your device.<br>Simulated information is not a reservation.</div>
     </aside>
     <section class="workspace">
       <div class="workspace-top"><div><div class="eyebrow" id="view-mode">SAVED REPLAY · CESIUMJS 3D</div><h2 id="run-title">Reference scenario</h2><p id="run-description">CPT / unaided search / 40% initial occupancy</p></div><div class="view-buttons"><button id="reset-camera" class="light-button">3D view</button><button id="overhead-camera" class="light-button">Overhead · N ↑</button></div></div>
       <div class="metrics"><article><span>Parked so far</span><strong id="parked">—</strong></article><article><span>Currently searching</span><strong id="searching">—</strong></article><article><span>Lot occupancy</span><strong id="occupied">—</strong></article><article><span>Abandoned so far</span><strong id="abandoned">—</strong></article></div>
-      <div class="map-shell"><div id="cesiumContainer"></div><div id="map-status" role="status">Loading the 3D lot…</div><div class="map-caption"><span class="pulse"></span> Corrected lot configuration <b>1,315 spaces</b></div><div class="map-legend"><span><i class="free"></i>Free</span><span><i class="taken"></i>Occupied</span><span><i class="blocked"></i>Blocked</span><span><i class="vehicle"></i>Driver</span></div></div>
+      <div class="map-shell"><div id="cesiumContainer"></div><div id="map-status" role="status">Loading the 3D lot…</div><div class="map-caption"><span class="pulse"></span> <span id="environment-map-label">Corrected lot geometry</span> <b>1,315 spaces</b></div><div class="map-legend"><span><i class="free"></i>Free</span><span><i class="taken"></i>Occupied</span><span><i class="blocked"></i>Unavailable</span><span><i class="closed"></i>Closed</span><span><i class="vehicle"></i>Vehicle</span><span><i style="background:#f28c32"></i>Pedestrian</span></div></div>
       <div class="playback"><button id="play" class="play" aria-label="Play replay">▶</button><span id="time">00:00</span><input id="timeline" aria-label="Simulation time" type="range" min="0" max="1" value="0" step="1"><span id="duration">00:00</span><select id="speed" aria-label="Playback speed"><option value="1">1×</option><option value="10">10×</option><option value="30" selected>30×</option><option value="100">100×</option></select></div>
-      <div class="lower-grid"><article class="panel"><div class="section-label">OCCUPANCY THROUGH TIME</div><svg id="chart" viewBox="0 0 660 150" role="img" aria-label="Occupancy through simulation time"></svg><p class="help">Playback speed changes the display clock; it does not change decisions.</p></article><article class="panel"><div class="section-label">INSPECT A DRIVER OR SPACE</div><div id="inspection">Click a vehicle or a parking space on the map to inspect it.</div></article><article class="panel outcomes"><div class="section-label">COMPLETED RUN OUTCOMES</div><div id="outcomes">Loading…</div><p class="help">Search includes all arrivals; walking and exit distance include parked drivers only.</p></article></div>
+      <div class="lower-grid"><article class="panel"><div class="section-label">OCCUPANCY THROUGH TIME</div><svg id="chart" viewBox="0 0 660 150" role="img" aria-label="Occupancy through simulation time"></svg><p class="help">Press play for a saved replay, or start a live simulation. Zoom in or follow a driver to see vehicle shapes. Playback speed does not change decisions.</p></article><article class="panel"><div class="section-label">INSPECT A DRIVER OR SPACE</div><div id="inspection">Click a vehicle or a parking space on the map to inspect it.</div></article><article class="panel outcomes"><div class="section-label">SIMULATION OUTCOMES</div><div id="outcomes">Loading…</div><p class="help">Search includes all arrivals; walking and exit distance include parked drivers only.</p></article></div>
       <div id="verification" class="verification"></div>
+      <article class="panel"><div class="section-label">TRAJECTORIES &amp; TRAFFIC</div><label for="driver-select">Inspect a driver, including unsuccessful drivers</label><select id="driver-select"><option value="">Choose a driver</option></select><label><input id="show-trajectory" type="checkbox" checked> Show selected driver's traveled route</label><label><input id="show-pedestrians" type="checkbox" checked> Show walking drivers</label><p id="pedestrian-routing-note" class="help">Downtown pedestrians use the configured walking network and wait at crossings. Estimated connections and exterior destination points require review. Older environments retain their original walking assumptions.</p><label><input id="follow-driver" type="checkbox"> Follow selected driver with the camera</label><p id="camera-follow-status" class="help" role="status">Camera follow is off.</p><label><input id="show-congestion" type="checkbox" checked> Color aisles by cumulative traffic delay</label><p id="supply-status" class="help"></p><div id="traffic-status">Select a traffic-enabled simulation to inspect queues, delay and stopping causes.</div><div id="congestion-episodes"></div><button type="button" class="text-button" id="download-congestion">Download congestion CSV</button><p class="help">A jam requires at least two traffic-constrained vehicles below 0.5 m/s in an aisle for at least 5 simulated seconds. Single-vehicle delays are recorded separately. Nearby vehicles use geometric visibility; buildings and mirrors are not modeled. This is not a calibrated traffic forecast.</p></article>
     </section>
   </main>
 </body>

@@ -18,6 +18,10 @@ for(const [relative,expected] of Object.entries(manifest.source_sha256)){
 for(const [relative,expected] of Object.entries(manifest.interface_sha256)){
   if(sha(await readFile(join(root,'dashboard',relative)))!==expected)throw Error(`Interface changed: ${relative}. Refresh the release snapshot before deployment.`);
 }
+for(const [relative,expected] of Object.entries(manifest.environment_assets_sha256??{})){
+  const file=resolve(release,relative);if(!file.startsWith(release+sep))throw Error('Invalid environment asset path');
+  if(sha(await readFile(file))!==expected)throw Error(`Environment asset checksum mismatch: ${relative}`);
+}
 if(sha(await readFile(join(release,'engine','python-source.zip')))!==manifest.bundle_sha256)throw Error('Simulation bundle checksum mismatch');
 
 // Only this explicitly resolved generated directory may be removed.
@@ -26,7 +30,7 @@ const old=await lstat(output).catch(()=>null);
 if(old?.isSymbolicLink())throw Error('Build destination must not be a symbolic link');
 await rm(output,{recursive:true,force:true});await mkdir(output,{recursive:true});
 await cp(release,output,{recursive:true});
-for(const relative of ['index.html','app.js','style.css','platform.js','platform.css','platform-views.html','THIRD_PARTY.md','engine/client.js','engine/worker.js']){
+for(const relative of ['index.html','app.js','environments.js','motion.js','pedestrians.js','follow-camera.js','style.css','platform.js','platform.css','platform-views.html','THIRD_PARTY.md','SUPPLY_TRAFFIC.md','ENVIRONMENTS.md','engine/client.js','engine/worker.js']){
   const target=join(output,relative);await mkdir(dirname(target),{recursive:true});
   await cp(join(root,'dashboard',relative),target);
 }

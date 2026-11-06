@@ -93,7 +93,7 @@ def build_candidate_features(
         "approach_time_s": euclidean_distance_m(current_position_m, (candidate.x_m, candidate.y_m)) / max(search_speed_m_per_s, 1e-9),
         "accessibility_match": float(candidate.accessible and accessibility_eligibility),
         "exit_distance_m": (
-            getattr(candidate, f"distance_to_{preferred_exit_id}_m", None) or 0.0
+            candidate.exit_distance(preferred_exit_id) or 0.0
             if preferred_exit_id else 0.0
         ),
         "walking_distance_m": euclidean_distance_m((candidate.x_m, candidate.y_m), destination_m),

@@ -45,6 +45,8 @@ class DeterministicUtilityModel:
                 rule_risk=float(rule_violation),
                 availability_probability=context.availability_probabilities.get(candidate.space_id, 1.0),
             )
+            if candidate.space_id in context.walking_distances_m:
+                features['walking_distance_m']=context.walking_distances_m[candidate.space_id]
             if candidate.space_id in context.approach_times_s:
                 features['approach_time_s'] = context.approach_times_s[candidate.space_id]
             if context.remaining_search_time_s is not None:

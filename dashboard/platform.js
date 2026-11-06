@@ -13,7 +13,7 @@
   async function json(url){const r=await fetch(url);if(!r.ok)throw Error(`Could not load ${url} (${r.status})`);return r.json();}
   function getEngine(){
     return engine??=new PandaEngine(event=>{
-      if(event.type==='ready'){runtimeLoad=event;el('engine-status').textContent=`Python ${event.runtime.python} · ready`;} 
+      if(event.type==='ready'){runtimeLoad=event;el('engine-status').textContent=`Python ${event.runtime.python} · ready`;}
       else if(event.type==='progress'||event.type==='error')el('engine-status').textContent=event.message;
       else if(event.type==='comparison-progress'){
         el('comparison-progress').max=event.total;el('comparison-progress').value=event.done;
@@ -21,7 +21,7 @@
       }
     });
   }
-  function setBusy(value){busy=value;for(const id of ['compare-start','benchmark-start','run-button','live-button'])if(el(id))el(id).disabled=value;el('cancel-compute').disabled=!value;}
+  function setBusy(value){busy=value;for(const id of ['compare-start','benchmark-start','run-button','live-button','environment-select','preview-environment'])if(el(id))el(id).disabled=value;el('cancel-compute').disabled=!value;}
   async function pauseLive(){if(window.setPlaying)window.setPlaying(false);if(window.closeLive)await window.closeLive();}
   function showPage(page){
     document.body.dataset.page=page;
@@ -39,9 +39,31 @@
     const max=Math.max(...rows.map(r=>Number(r.metrics[key].mean)||0),1);
     return `<article class="panel"><h2>${label}</h2><div class="metric-bars">${rows.map(r=>`<div class="bar-row"><span>${names[r.model]} · ${infos[r.information].replace(' information','')}</span><div class="bar-track"><div class="bar-fill condition-${r.information}" style="width:${Math.max(0,(r.metrics[key].mean??0)/max*100)}%"></div></div><b>${number(r.metrics[key].mean,1)}</b></div>`).join('')}</div></article>`;
   }
+  function trafficComparison(result){
+    const jamEpisodes=r=>r.traffic.jam_episodes??[];
+    if(!result.settings.traffic_enabled)return '';
+    const totals=[],hotspots=[];
+    for(const model of result.models)for(const information of ['unaided','aisle','space']){
+      const runs=result.runs.filter(r=>r.settings.model===model&&r.settings.information===information),n=runs.length;
+      const aisles=new Set(runs.flatMap(r=>Object.keys(r.traffic.aisle_delay_s)));
+      totals.push(`<tr><td>${names[model]} · ${infos[information]}</td><td>${n}</td><td>${number(runs.reduce((v,r)=>v+r.traffic.cumulative_delay_s,0)/n,1)}</td><td>${number(runs.reduce((v,r)=>v+jamEpisodes(r).length,0)/n,1)}</td></tr>`);
+      for(const aisle of aisles){
+        const count=runs.filter(r=>jamEpisodes(r).some(e=>e.aisle===aisle)).length;
+        const delay=runs.reduce((v,r)=>v+(r.traffic.aisle_delay_s[aisle]??0),0)/n;
+        const peak=Math.max(...runs.map(r=>r.traffic.aisle_peak_queue[aisle]??0));
+        const causes={};for(const r of runs)for(const e of jamEpisodes(r).filter(e=>e.aisle===aisle))for(const [cause,ticks] of Object.entries(e.causes))causes[cause]=(causes[cause]??0)+ticks;
+        const cause=Object.entries(causes).sort((a,b)=>b[1]-a[1])[0]?.[0]?.replaceAll('_',' ')??'No episode';
+        hotspots.push({model,information,aisle,count,n,delay,peak,cause});
+      }
+    }
+    hotspots.sort((a,b)=>b.count/b.n-a.count/a.n||b.delay-a.delay);
+    return `<article class="panel"><h2>Traffic effects across simulations</h2><div class="table-scroll"><table class="results-table"><thead><tr><th>Model / information</th><th>Simulations</th><th>Mean traffic delay (vehicle-seconds)</th><th>Mean sustained jams</th></tr></thead><tbody>${totals.join('')}</tbody></table></div><h2>Recurring queue locations</h2><div class="table-scroll"><table class="results-table"><thead><tr><th>Model / information</th><th>Aisle</th><th>Simulations with congestion</th><th>Mean delay (vehicle-seconds)</th><th>Largest queue</th><th>Most frequent cause</th></tr></thead><tbody>${hotspots.slice(0,24).map(r=>`<tr><td>${names[r.model]} · ${infos[r.information]}</td><td>${escape(window.PandaSegmentInfo?.(r.aisle,result.settings.environment?.config??{},result.runs[0]?.segment_labels??{})?.label??r.aisle)}</td><td>${r.count} / ${r.n} · ${number(100*r.count/r.n,0)}%</td><td>${number(r.delay,1)}</td><td>${r.peak}</td><td>${escape(r.cause)}</td></tr>`).join('')}</tbody></table></div><p class="help">Up to 24 model, service and aisle combinations, ranked by the proportion of simulations with an episode with at least two queued vehicles lasting at least 5 seconds, then mean delay. Delay averages include simulations with zero delay. These are descriptive frequencies in the selected scenarios, not measured congestion probabilities. Full records are in the comparison download.</p></article>`;
+  }
   function displayComparison(result){
     el('comparison-results').innerHTML=`<div class="comparison-outcomes">${bars(result.cells,'search_s','Mean search duration')}${bars(result.cells,'success_pct','Parking success')}</div><article class="panel"><h2>Outcomes by information condition</h2>${table(result.cells)}</article><article class="panel"><h2>Change from unaided search</h2>${table(result.effects,true)}<p class="help">Pointwise 95% percentile bootstrap intervals use 10,000 resamples of whole matched replications. No interval is calculated from a single replication. Intervals are not adjusted for multiple comparisons. Walking changes can reflect different parked populations; combined time uses drivers parked in both conditions.</p></article>`;
-    el('comparison-status').textContent=`Completed ${result.runs.length} full-lifecycle simulations in ${number(result.wall_s,1)} s. Population and initial occupancy matched across all conditions. ${result.replications} replication${result.replications===1?'':'s'} per condition.`;
+    if(result.settings.simulation_duration_s!=null)el('comparison-results').insertAdjacentHTML('afterbegin','<p class="help">Fixed observation window: success means parked by the cutoff among arrivals before it. Search is elapsed search observed by the cutoff, including unfinished searches and zero search before admission. These outcomes differ from full-trip search and eventual success.</p>');
+    el('comparison-results').insertAdjacentHTML('beforeend',trafficComparison(result));
+    el('comparison-status').textContent=`${result.settings.environment?.name??'Walmart · Laramie'}: completed ${result.runs.length} ${result.settings.simulation_duration_s!=null?'fixed-window':'full-trip'} simulations in ${number(result.wall_s,1)} s. Population and initial occupancy matched across all conditions. ${result.replications} replication${result.replications===1?'':'s'} per condition.`;
     el('comparison-json').disabled=false;el('comparison-csv').disabled=false;
     const details=document.createElement('details');details.className='panel';details.innerHTML='<summary>Reproducibility record</summary><pre id="comparison-provenance"></pre>';el('comparison-results').append(details);
     verifyReference(result).then(record=>{el('comparison-provenance').textContent=JSON.stringify(record,null,2);}).catch(error=>{el('comparison-provenance').textContent=JSON.stringify({reference_check_error:error.message});});
@@ -49,7 +71,7 @@
   async function verifyReference(result){
     const record={source_bundle_sha256:result.source_manifest?.bundle_sha256??null,runtime:result.runtime,matched_inputs_within_each_seed:true};
     const s=result.settings;
-    if(s.seed!==1000||s.population_size!==80||s.occupancy!==.8||s.arrival_interval_s!==20||result.replications!==1){record.reference_check='Available for seed 1000, 80 drivers, 80% occupancy, 20-second arrivals and one replication.';return record;}
+    if(s.seed!==1000||s.population_size!==80||s.occupancy!==.8||s.arrival_interval_s!==20||result.replications!==1||s.environment!=null||s.simulation_duration_s!=null||s.traffic_enabled||s.initial_free_count!=null||s.initial_free_space_ids!=null||s.initial_occupied_space_ids!=null||s.closed_space_ids?.length||s.interventions?.length){record.reference_check='Available for the original movement mode, percentage occupancy, no interventions, seed 1000, 80 drivers, 80% occupancy, 20-second arrivals and one simulation per condition.';return record;}
     const ref=await json('engine/full-size-fixture.json');let maxInput=0,maxOutcome=0,count=0;const errors=[];
     if(!record.source_bundle_sha256)errors.push('Verified source manifest missing');
     function walk(a,b,path){
@@ -140,9 +162,12 @@
     finally{el('benchmark-status').textContent=JSON.stringify(measurement,null,2);el('benchmark-download').disabled=false;monitor.remove();setBusy(false);showPage('about');}
   }
   window.PandaPlatform={
+    isBusy(){return busy;},
+    environmentRequest(payload){if(busy)throw Error('Finish the current computation before importing an environment.');return getEngine().request("validate_environment",payload);},
     attachViewer(viewer){
+      document.getElementById("export-view-button")?.remove();
       viewer.scene.postRender.addEventListener(()=>{renderedFrames++;});
-      const button=document.createElement('button');button.className='light-button';button.textContent='Export 3D view';document.querySelector('.view-buttons').append(button);
+      const button=document.createElement('button');button.id='export-view-button';button.className='light-button';button.textContent='Export 3D view';document.querySelector('.view-buttons').append(button);
       button.addEventListener('click',()=>{const remove=viewer.scene.postRender.addEventListener(()=>{remove();try{const source=viewer.scene.canvas,exportCanvas=document.createElement('canvas');exportCanvas.width=source.width;exportCanvas.height=source.height+30;const context=exportCanvas.getContext('2d');context.fillStyle='#f5f8f5';context.fillRect(0,0,exportCanvas.width,exportCanvas.height);context.drawImage(source,0,0);context.fillStyle='#243f3b';context.font='12px sans-serif';context.fillText('Map data (c) OpenStreetMap contributors | CesiumJS | PANDA: estimated geometry',10,source.height+20);exportCanvas.toBlob(blob=>{if(!blob)return;const href=URL.createObjectURL(blob),a=document.createElement('a');a.href=href;a.download='panda-3d-view-'+Date.now()+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(href),1000);});}catch(error){el('job-status').textContent=error.message;}});viewer.scene.requestRender();});
     },
     async api(url,options={}){
@@ -161,7 +186,7 @@
         if(jobs.has(id))return jobs.get(id);throw Error('Unknown simulation');
       }
       if(url==='/api/live'){if(busy)throw Error('Another computation is in progress.');return {id:'browser-live',...await getEngine().request('live',payload)};}
-      if(url.startsWith('/api/live/'))return getEngine().request(payload.action==='close'?'close':'advance',payload);
+      if(url.startsWith('/api/live/'))return getEngine().request(payload.action==='close'?'close':payload.intervention?'intervene':'advance',payload.intervention??payload);
       throw Error('Unknown platform operation');
     }
   };

@@ -10,6 +10,10 @@ ABM executes in a Pyodide Web Worker on the visitor's device. The website
 changes how experiments are requested and displayed; it does not rewrite
 parking decisions in JavaScript.
 
+## Supply and traffic extension
+
+Exact empty-space counts, map selections, live closures and reopening, scheduled background departures, driver routes and an optional aisle-traffic model are described in [the supply and traffic guide](SUPPLY_TRAFFIC.md). The traffic mode is experimental; archived research results retain their original movement model.
+
 ## End-user workflow
 
 1. **3D simulation:** choose deterministic utility, stochastic utility or CPT;
@@ -83,3 +87,26 @@ that transform. `dashboard/alignment.json` records the fit and config hash.
 The platform supports scenario-based decision support. It does not continuously
 assimilate observed occupancy or validate assumed behavior against field data.
 See [THIRD_PARTY.md](THIRD_PARTY.md) for dependencies and map attribution.
+
+## Simulation duration and pause
+
+The sidebar supports 10-, 20-, 30- and 60-minute simulation windows, a custom 1–120-minute window, or full trips. Pause/Resume stops and continues the same live model. Window duration does not change a driver's 600-second search budget. At a cutoff, unfinished searches remain distinct from abandonments. Population size and arrival interval determine how many drivers arrive. See [SUPPLY_TRAFFIC.md](SUPPLY_TRAFFIC.md) for cutoff metrics and controls.
+
+## Multiple environments
+
+Select Walmart or the synthetic transfer layout, or import a lot JSON and self-contained GLB models. Imported lots include explicit aisle connections and currently require two doors and two paired vehicle access points. Validate the layout, adjust the visual model alignment and confirm the preview before simulating. Download the environment configuration and retain the original GLBs; imported files stay in the current tab. See [ENVIRONMENTS.md](ENVIRONMENTS.md) for the workflow, JSON fields and limits.
+
+## Vehicle animation
+
+Generated drivers use original lightweight GLB vehicle models: compact, sedan, SUV, van or pickup, selected from their ABM vehicle type. Models have different metre-scale dimensions and remain visible while parked during the walking/activity stages. They follow recorded positions during search and departure. Press play on a saved replay or start live execution; zoom in or follow a driver for detail. These are stylized vehicle meshes, not photorealistic car assets. Visual dimensions do not change the optional traffic model's common 4.5-m vehicle length or make it calibrated against observed traffic. Background occupancy remains colored space markers, not individually moving cars.
+
+
+New simulations animate actual within-tick route corners and show directional lane lines when traffic is enabled. The congestion panel reports aisle episodes, duration, peak queued vehicles and modeled causes; **Download congestion CSV** exports the records. Traffic is selected by default for new interactive scenarios. The archived reference replay and Python default remain unchanged. See [SUPPLY_TRAFFIC.md](SUPPLY_TRAFFIC.md) for definitions and limits.
+
+
+## Walking drivers
+
+**Show walking drivers** displays a pedestrian for each driver walking to the assigned door and returning to the parked car. The car stays in its space during the activity. Select a driver and enable **Follow selected driver** to inspect the trip, preferably at 1× playback. The pedestrian animation uses existing walking timestamps and straight-line distances; it does not add a sidewalk network or pedestrian–vehicle interactions. New recordings include explicit walking intervals, while older replays use their recorded state transitions.
+
+
+Camera follow uses the driver selected in the dropdown even when another parking space is inspected. Enabling it brings the map into view and centers a close camera on the vehicle or walking pedestrian; during the activity it stays near the assigned door. Follow starts once a future driver arrives and reports when a driver has left. Unchecking follow releases the camera. The 3D/overhead overview buttons also exit follow mode. Camera positioning does not depend on a model asset finishing its bounding-sphere load.

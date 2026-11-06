@@ -87,7 +87,7 @@ class Handler(SimpleHTTPRequestHandler):
         if path not in ('/api/runs','/api/live') and not live_match:self.json_response(dict(error='Unknown endpoint'),404);return
         try:
             n=int(self.headers.get('Content-Length','0'))
-            if not 0<n<=4096:raise ValueError('Expected a small JSON scenario')
+            if not 0<n<=262144:raise ValueError('Expected a bounded JSON scenario')
             payload=json.loads(self.rfile.read(n))
             if live_match:
                 with LOCK:session=LIVE.get(live_match[1])
@@ -95,6 +95,8 @@ class Handler(SimpleHTTPRequestHandler):
                 if payload=={'action':'close'}:
                     with LOCK:LIVE.pop(live_match[1],None)
                     self.json_response(dict(closed=True));return
+                if isinstance(payload,dict) and set(payload)=={'intervention'}:
+                    self.json_response(session.intervene(payload['intervention']));return
                 if not isinstance(payload,dict) or set(payload)!={'seconds'}:raise ValueError('Expected seconds or close action')
                 self.json_response(session.advance(payload['seconds']));return
             settings=validate_settings(payload)

@@ -45,13 +45,16 @@ def lot_distance_references(facility, attributes, references: ReferencePoints) -
     """
     walks, exits = [], []
     for space in facility.spaces:
+        walk=facility.walking_distance(space,attributes)
+        if not math.isfinite(walk):continue
+        if not space.permits_planned_stay(attributes,walking_distance_m=walk):
+            continue
         if space.unavailable or not space.is_compatible_with_vehicle(attributes.vehicle_type):
             continue
         if space.accessible and not attributes.accessibility_eligibility:
             continue
         if space.reserved_type and attributes.permit_type != (space.permit_requirement or space.reserved_type):
             continue
-        walk = math.dist((space.x_m, space.y_m), attributes.destination)
         if attributes.max_walking_distance_m is not None and walk > attributes.max_walking_distance_m:
             continue
         walks.append(walk)

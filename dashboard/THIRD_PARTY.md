@@ -14,3 +14,7 @@ shown by Cesium. The platform does not claim ownership of third-party imagery.
 The parking configuration is an estimated research reconstruction. The reused
 building and pavement models provide approximate visual context; corrected
 space coordinates determine the simulated inventory. They are not survey data.
+
+## Downtown building context
+
+Building footprints and mapped street attributes: © OpenStreetMap contributors, https://www.openstreetmap.org/copyright (ODbL). Local extract retrieved 2026-11-05. Generated GLB uses simplified extrusions; heights are assumed unless mapped. OSM geometry and attributes are not a field survey.

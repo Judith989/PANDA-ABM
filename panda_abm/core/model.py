@@ -67,12 +67,19 @@ class ParkingModel(Model):
         failure_delay_s: float = 30.0,
         decision_seed_namespace: str | None = None,
         information_mode: str = 'unaided',
+        initial_free_space_ids: list[str] | None = None,
+        initial_free_count: int | None = None,
+        closed_space_ids: list[str] | None = None,
+        interventions: list[dict] | None = None,
+        traffic_enabled: bool = False,
+        initial_occupied_space_ids: list[str] | None = None,
     ):
         super().__init__(rng=seed)
         if information_mode not in INFORMATION_MODES:
             raise ValueError(f'Information mode must be one of {INFORMATION_MODES}')
         self.information_mode=information_mode
         self.facility = facility
+        if facility.pedestrian_network and any(e["kind"]=="crossing" for e in facility.pedestrian_network["edges"]) and not traffic_enabled:raise ValueError("Pedestrian crossings require traffic interactions")
         self.population = population
         self.decision_model_name = decision_model if isinstance(decision_model, str) else decision_model.model_name
         self.decision_model = self._build_decision_model(decision_model)
@@ -137,7 +144,14 @@ class ParkingModel(Model):
         self.forecast_provider = forecast_provider or NullForecastProvider()
         self.aisle_information=AisleInformationService(self)
 
-        self._initialize_occupancy(initial_occupancy_rate)
+        self.intervention_log = []
+        self.scheduled_interventions = list(interventions or [])
+        self._initialize_occupancy(initial_occupancy_rate, initial_free_space_ids, initial_free_count, closed_space_ids, initial_occupied_space_ids)
+        from panda_abm.core.interventions import apply_intervention
+        if closed_space_ids:
+            apply_intervention(self, dict(action='close', space_ids=closed_space_ids))
+        from panda_abm.core.traffic import AisleTraffic
+        self.traffic = AisleTraffic(self) if traffic_enabled else None
 
         for index, spec in enumerate(population.drivers):
             entry_index = (
@@ -155,10 +169,27 @@ class ParkingModel(Model):
             raise ValueError(f"Unknown decision model: {decision_model}")
         return DECISION_MODELS[key]()
 
-    def _initialize_occupancy(self, occupancy_rate: float) -> None:
+    def _initialize_occupancy(self, occupancy_rate: float, free_ids=None, free_count=None, closed_ids=None, occupied_ids=None) -> None:
         usable = [s for s in self.facility.spaces if not s.unavailable]
-        n_occupied = int(round(len(usable) * occupancy_rate))
-        chosen = set(self.rng.choice([s.space_id for s in usable], size=n_occupied, replace=False)) if n_occupied else set()
+        ids = [s.space_id for s in usable]
+        if sum(x is not None for x in (free_ids, free_count, occupied_ids)) > 1:
+            raise ValueError('Choose one initial supply mode')
+        if occupied_ids is not None:
+            if len(set(occupied_ids)) != len(occupied_ids) or not set(occupied_ids) <= set(ids):
+                raise ValueError('Initial occupied IDs must be distinct usable spaces')
+            chosen = set(occupied_ids)
+        elif free_ids is not None:
+            if len(set(free_ids)) != len(free_ids) or not set(free_ids) <= set(ids):
+                raise ValueError('Initial free IDs must be distinct usable spaces')
+            chosen = set(ids)-set(free_ids)
+        elif free_count is not None:
+            eligible = [sid for sid in ids if sid not in set(closed_ids or [])]
+            if type(free_count) is not int or not 0 <= free_count <= len(eligible):
+                raise ValueError('Initial free count exceeds usable inventory')
+            chosen = set(ids)-set(self.rng.choice(eligible, size=free_count, replace=False))
+        else:
+            n_occupied = int(round(len(usable) * occupancy_rate))
+            chosen = set(self.rng.choice(ids, size=n_occupied, replace=False)) if n_occupied else set()
         for sid in chosen:
             self.resource_manager.claim_space("initial_occupancy", sid)
             self.event_logger.log("InitialSpaceOccupied", self.clock_s, space_id=sid)
@@ -191,6 +222,9 @@ class ParkingModel(Model):
 
     def try_park(self, agent: DriverAgent, space_id: str) -> bool:
         space = self.facility.space_by_id[space_id]
+        if self.facility.pedestrian_network is not None and not math.isfinite(self.facility.walking_distance(space,agent.attributes)):
+            self.event_logger.log('NoWalkingRoute',self.clock_s,agent=agent,space=space)
+            return False
         if not self.resource_manager.claim_space(agent.driver_id, space_id):
             self.event_logger.log("SpaceClaimFailed", self.clock_s, agent=agent, space=space)
             return False
@@ -209,10 +243,23 @@ class ParkingModel(Model):
         # independent, so batching cannot alter trajectories or tie draws.
         for _ in range(round(self.step_seconds / self.integration_seconds)):
             self.before_physical_tick()
+            departure_step=getattr(getattr(self,'background_departures',None),'step',None)
+            if callable(departure_step):departure_step()
+            from panda_abm.core.interventions import apply_intervention
+            due = [e for e in self.scheduled_interventions if e['time_s'] <= self.clock_s]
+            for event in due:
+                apply_intervention(self, event)
+                self.scheduled_interventions.remove(event)
+            if getattr(self,'through_traffic',None):self.through_traffic.begin_tick()
+            if self.traffic:
+                self.traffic.begin_tick()
             agents = sorted(self.agents, key=lambda a: a.driver_id)
             self.scheduler_rng.shuffle(agents)
             for agent in agents:
                 agent.step()
+            if getattr(self,'through_traffic',None):self.through_traffic.step()
+            if self.traffic:
+                self.traffic.end_tick()
             self.clock_s = round(self.clock_s + self.integration_seconds, 9)
         self.event_logger.log(
             "SystemSnapshot",
@@ -235,6 +282,9 @@ class ParkingModel(Model):
         latest_arrival = max(d.attributes.arrival_time_s for d in self.population.drivers)
         route_bound = sum(e['weight'] for _,_,e in self.navigation.graph.edges(data=True)) / self.search_speed_m_per_s
         max_runtime = latest_arrival + self.max_search_time_s + max(d.attributes.expected_dwell_duration_s for d in self.population.drivers) + route_bound + 2000
+        max_runtime=max(max_runtime,getattr(getattr(self,'through_traffic',None),'demand_s',0)+route_bound+2000)
+        from panda_abm.core.pedestrian_movement import completion_padding
+        max_runtime+=completion_padding(self)
         while self.clock_s <= max_runtime:
             self.step()
             active = [
@@ -243,7 +293,8 @@ class ParkingModel(Model):
                 if getattr(a, "state", None)
                 not in {DriverState.LEFT, DriverState.ABANDONED}
             ]
-            if not active:
+            from panda_abm.core.urban_traffic import through_finished
+            if not active and through_finished(self):
                 break
         else:
             raise RuntimeError('Simulation time bound reached with unfinished drivers')

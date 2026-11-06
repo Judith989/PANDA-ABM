@@ -21,6 +21,7 @@ class ParkingResourceManager:
     def __init__(self, facility: Facility, initial_states: dict[str, ParkingSpaceState]):
         self.facility = facility
         self.states = initial_states
+        self._usable_ids = tuple(s.space_id for s in facility.spaces if not s.unavailable)
 
     def is_available(self, space_id: str) -> bool:
         state = self.states[space_id]
@@ -44,10 +45,12 @@ class ParkingResourceManager:
         return True
 
     def usable_count(self) -> int:
-        return sum(1 for state in self.states.values() if not state.unavailable)
+        # Fixed physical inventory: closing an occupied bay must not make its
+        # vehicle disappear from occupancy or silently change the denominator.
+        return len(self._usable_ids)
 
     def occupied_count(self) -> int:
-        return sum(1 for state in self.states.values() if state.occupied and not state.unavailable)
+        return sum(self.states[sid].occupied for sid in self._usable_ids)
 
     def occupancy_rate(self) -> float:
         usable = self.usable_count()

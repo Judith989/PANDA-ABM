@@ -10,10 +10,11 @@ DEST=ROOT/'web/release'
 
 
 def main():
-    files=['scene.json','reference.json','study-results.json','alignment.json',
-           'assets/walmart_building.glb','assets/parking_asphalt.glb',
+    files=['environments.json','scene.json','reference.json','study-results.json','alignment.json',
+           'assets/walmart_building.glb','assets/parking_asphalt.glb','assets/synthetic_pavement.glb','assets/downtown_buildings.glb','assets/downtown-synthetic.zip','assets/pedestrian.glb',
            'engine/manifest.json','engine/python-source.zip','engine/native-fixtures.json',
            'engine/full-size-fixture.json','engine/runtime/LICENSE-PYODIDE.txt']
+    files += ['assets/vehicles/'+kind+'.glb' for kind in ('compact','sedan','suv','van','truck')]
     files += ['evaluation/'+name for name in ('REPORT.md','performance_summary.csv',
         'browser_performance.json','native_performance.json','matched_comparison_verification.json',
         'archived_reference_verification.json','full_size_verification.json')]
@@ -24,6 +25,9 @@ def main():
     for name,expected in manifest['interface_sha256'].items():
         if hashlib.sha256((WEB/name).read_bytes()).hexdigest()!=expected:
             raise RuntimeError(f'Interface snapshot is stale: {name}; rebuild public assets first')
+    for name,expected in manifest.get('environment_assets_sha256',{}).items():
+        if hashlib.sha256((WEB/name).read_bytes()).hexdigest()!=expected:
+            raise RuntimeError(f'Environment asset is stale: {name}; rebuild public assets first')
     for relative in files:
         source=WEB/relative;target=DEST/relative
         if not source.is_file():raise FileNotFoundError(f'Prepare the tested dashboard asset first: {relative}')

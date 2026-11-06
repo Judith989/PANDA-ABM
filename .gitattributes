@@ -5,3 +5,8 @@ dashboard/** -text
 web/release/** -text
 *.glb binary
 *.zip binary
+
+data/lot_config.satellite_estimated.json -text
+data/lot_config.downtown_laramie.review.json -text
+data/lot_config.downtown_laramie.json -text
+data/lot_config.synthetic.json -text

@@ -48,10 +48,10 @@ class ExperimentalAisleInformation(AisleInformationService):
             agent.information_aisle_id=None
             return False
         if agent.information_aisle_id in positive and agent.route:return True
-        distances=nav.distances((agent.x_m,agent.y_m),{n for a in positive for n in nav.aisle_nodes[a]})
+        distances=nav.distances((agent.x_m,agent.y_m),{n for a in positive for n in nav.aisle_nodes[a]},heading=getattr(agent,'routing_heading',None))
         aisle=min(positive,key=lambda a:(min(distances[n] for n in nav.aisle_nodes[a]),a))
         entry,other=sorted(nav.aisle_nodes[aisle],key=lambda n:(distances[n],n))
-        agent.route=nav.route((agent.x_m,agent.y_m),entry)+nav.route(nav.positions[entry],other)
+        agent.route=nav.route((agent.x_m,agent.y_m),entry,heading=getattr(agent,'routing_heading',None))+nav.route(nav.positions[entry],other)
         agent.patrol_goal=other;agent.information_aisle_id=aisle;agent.information_route_changes+=1
         agent.log('InformationSearchAreaSelected',details=dict(aisle_id=aisle,free_count=report.free_counts[aisle],
             compatible_capacity=report.compatible_capacity[aisle],report_time_s=report.observed_at_s,

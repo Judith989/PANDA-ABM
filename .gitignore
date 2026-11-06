@@ -22,5 +22,8 @@ web/dist/
 dashboard/engine/manifest.json
 dashboard/engine/native-fixtures.json
 dashboard/engine/full-size-fixture.json
+dashboard/engine/traffic-fixtures.json
 dashboard/study-results.json
 dashboard/evaluation/
+
+dashboard/environments.json

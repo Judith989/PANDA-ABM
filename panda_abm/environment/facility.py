@@ -6,6 +6,8 @@ Author: Judith Njoku
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
+import math
 from pathlib import Path
 import json
 
@@ -36,6 +38,22 @@ class Facility:
     entry_point_ids: tuple[str, ...] = ()
     exit_point_ids: tuple[str, ...] = ()
     walmart_door_ids: tuple[str, ...] = ()
+
+    aisle_network: dict | None = None
+    pedestrian_network: dict | None = None
+
+    @cached_property
+    def walking_network(self):
+        from panda_abm.environment.pedestrian_navigation import PedestrianNetwork
+        return PedestrianNetwork(self.pedestrian_network) if self.pedestrian_network is not None else None
+
+    def walking_distance(self,space,attributes):
+        if self.walking_network is None:return math.dist((space.x_m,space.y_m),attributes.destination)
+        return self.walking_network.distance(space.space_id,attributes.walmart_door_id)
+
+    def walking_route(self,space,attributes):
+        return self.walking_network.route(space.space_id,attributes.walmart_door_id) if self.walking_network is not None else None
+
 
     @property
     def space_by_id(self) -> dict[str, ParkingSpace]:
@@ -106,6 +124,9 @@ def load_facility_from_lot_config(path: str | Path) -> Facility:
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
 
+    if raw.get('pedestrian_network') is not None:
+        from panda_abm.twin.environments import validate_environment,facility_from_environment
+        return facility_from_environment(validate_environment(raw))
     spaces = tuple(parking_space_from_lot_config_slot(slot) for slot in raw["slots"])
     meta = raw.get("meta", {})
     def local_points(key: str) -> tuple[tuple[float, float], ...]:

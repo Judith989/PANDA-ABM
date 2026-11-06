@@ -1,0 +1,2 @@
+# Build-time geometry dependency; not needed in the browser runtime.
+shapely==2.2.0

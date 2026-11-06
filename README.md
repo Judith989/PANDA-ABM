@@ -2,7 +2,9 @@
 
 Author: Judith Njoku-Vowels
 
-Updated: 3 November 2026
+**Walking-network update, 5 November 2026:** Both Walmart variants and the fictional synthetic layout now use explicit pedestrian graphs alongside downtown. Walmart combines OSM building/road geometry with estimated internal paths; no mapped footways were found inside the selected Walmart scope. Synthetic paths are generated, not claimed to represent a real OSM site. Network distances govern current walking decisions and movement. The historical experiments described below retain their original straight-line assumptions. The newly launched planning campaign was stopped and retained as superseded pending revised routing and vehicle-clearance verification. Source details, backups and overlays are in [the walking-network record](research/walmart_pedestrians_20261105/README.md).
+
+Updated: 5 November 2026
 
 PANDA-ABM was developed as a parking agent-based research simulation using Python and Mesa.
 
@@ -24,6 +26,29 @@ The website brings the Python ABM into a georeferenced Cesium 3D environment. Us
 The 3D scene uses the corrected lot configuration, with building and pavement models providing approximate visual context. It displays simulated conditions. Continuous updates from the physical facility remain future work.
 
 See the [platform guide](dashboard/README.md) for user workflows and the [deployment guide](web/DEPLOYMENT.md) for Vercel configuration. The checked-in release builds without private study archives, a Python backend or a Cesium ion token. Results are held in the browser tab's memory; download them before closing the tab.
+
+### Environment library
+
+Walmart has two separate simulation options: **Original estimate** with 1,315 records and 1,106 usable spaces, and **Satellite estimate** with 472 provisional records and 396 usable spaces. The latter inherits restrictions from nearest original records as an explicit assumption. Original configurations and archived results remain unchanged; the satellite variant produces separate results.
+
+The local dashboard supports Walmart and the synthetic transfer layout as selectable environments. Users can import lot JSON files with explicit aisle networks and self-contained GLB models, preview alignment and validate the configuration before simulating. The current driver model requires two destination doors and two paired vehicle access points. Files remain in the browser tab; download the environment configuration and keep the original models to reload it. See [the environment guide](dashboard/ENVIRONMENTS.md). These changes reach the public website after the prepared release is pushed and deployed.
+
+### Interactive supply and traffic experiments
+
+Live simulations support **Pause/Resume**, 10-, 20-, 30- and 60-minute windows, custom durations from 1 to 120 minutes, or full trips. A time cutoff ends observation without forcing unfinished drivers to abandon. Each driver's 600-second search budget is unchanged. Driver count and arrival interval still determine demand. Cutoff summaries distinguish unfinished searches and drivers who have not yet arrived from completed outcomes.
+
+The new local dashboard supports an exact number of initially empty spaces, including zero, or occupied spaces selected by clicking the layout. Map selection starts at 0% occupancy; only clicked spaces start occupied, and clicking again clears them. Users can close and reopen usable spaces and release background vehicles during a live simulation, or schedule these actions before starting. Closing an occupied space preserves its vehicle and prevents another claim until the space is reopened. The fixed 1,106-space inventory remains the occupancy denominator; empty, open and closed counts are displayed separately.
+
+Every driver's timestamped position and state history is retained, including unsuccessful drivers. Selecting a driver displays its traveled route. The optional traffic mode adds following gaps, junction yielding, parking-maneuver obstruction, queue episodes and aisle delay. Inspection shows speed, vehicles ahead and behind, stopping cause and observations from the last decision scan. Downloads include trajectories, observations, intervention times and traffic records.
+
+Traffic mode is an experimental kinematic model on the inferred aisle network. It uses two directional lanes, a 4.5-m vehicle length and a 2-m following gap. It is not calibrated against traffic observations, does not model building occlusion, and does not establish collision-dynamics accuracy. The archived paper results use the original independent-movement mode, which remains the default.
+
+~~~powershell
+python -m pytest tests/test_supply_traffic.py
+python scripts/audit_supply_traffic.py
+~~~
+
+The audit checks full and five-empty-space conditions across the three decision models and verifies an original 80-driver archived outcome signature. Details are in [the supply and traffic guide](dashboard/SUPPLY_TRAFFIC.md). Changes become available on the public website after the updated release is pushed and deployed.
 
 ## Installation
 

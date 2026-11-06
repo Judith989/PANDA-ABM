@@ -1,0 +1,13 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('dashboard/app.js','utf8'),config=JSON.parse(fs.readFileSync('data/lot_config.json','utf8'));
+const elements=new Map(),el=id=>{if(!elements.has(id))elements.set(id,{checked:true,textContent:'',innerHTML:''});return elements.get(id)};
+let flown;const added=[];
+const ctx={state:{scene:{config},selected:'driver:D0',run:{tracks:[{id:'D0'}]},slotEntities:new Map()},$:el,esc:String,local:(x,y,z)=>({x,y,z}),updateCameraFollow(){},viewer:{entities:{add:e=>(added.push(e),e),remove(){}},camera:{flyToBoundingSphere:s=>flown=s}},document:{querySelector:()=>({scrollIntoView(){}})},C:{Cartesian2:class{},Color:{WHITE:'white',YELLOW:'yellow',fromCssColorString:()=>({})},BoundingSphere:class{constructor(center,radius){this.center=center;this.radius=radius}},HeadingPitchRange:class{}},sample:()=>({state:'searching',search:10,space:null}),telemetryAt:()=>null};
+vm.runInNewContext(source.slice(source.indexOf('function parkingModules('),source.indexOf('function createScene(')),ctx);
+assert.equal(ctx.parkingModules(config).length,17);ctx.showModuleLabels();assert.equal(added.length,17);assert.equal(added[0].label.text,'A');assert.equal(added.at(-1).label.text,'Q');assert.match(el('module-list').innerHTML,/Module A/);
+ctx.focusParkingModule('Parking_Module_A');assert(flown);assert.match(el('inspection').textContent,/Module A/);assert.equal(el('follow-driver').checked,false);
+const satellite=JSON.parse(fs.readFileSync('data/lot_config.satellite_estimated.json','utf8'));assert.equal(ctx.parkingModules(satellite).length,15);
+vm.runInNewContext(source.slice(source.indexOf('function inspect()'),source.indexOf('function syncPauseButton()')),ctx);
+ctx.inspect();assert.match(el('inspection').innerHTML,/D0/);
+const slot=config.slots[0];ctx.state.selected='slot:'+slot.id;ctx.state.slotEntities.set(slot.id,{slot,occupied:false,closed:false});ctx.inspect();assert.match(el('inspection').innerHTML,/Module A/);
+console.log('Walmart module markers, focus, satellite groups, driver and slot inspection passed.');

@@ -33,10 +33,10 @@ class AisleInformationService:
         for s in static:grouped.setdefault(model.navigation.space_aisle[s.space_id],[]).append(s)
         result={}
         for aisle,spaces in grouped.items():
-            walk=np.array([np.hypot(s.x_m-agent.attributes.destination_x_m,s.y_m-agent.attributes.destination_y_m) for s in spaces])
+            walk=np.array([model.facility.walking_distance(s,agent.attributes) for s in spaces])
             exit_id=agent.attributes.preferred_exit_id
             features=dict(approach_time_s=0.,search_time_s=0.,walking_distance_m=walk,
-                exit_distance_m=np.array([(getattr(s,f'distance_to_{exit_id}_m',None) or 0.) if exit_id else 0. for s in spaces]),
+                exit_distance_m=np.array([(s.exit_distance(exit_id) or 0.) if exit_id else 0. for s in spaces]),
                 price_per_hour=np.array([s.price_per_hour for s in spaces]),
                 accessibility_match=np.array([float(s.accessible and agent.attributes.accessibility_eligibility) for s in spaces]),
                 rule_risk=np.array([float(bool((s.accessible and not agent.attributes.accessibility_eligibility) or
@@ -56,7 +56,7 @@ class AisleInformationService:
         return AisleInformation(self.model.clock_s,
             {aisle:sum(not(self.model.space_states[sid].occupied or self.model.space_states[sid].unavailable) for sid in ids)
              for aisle,(ids,_) in static.items()},
-            {aisle:len(ids) for aisle,(ids,_) in static.items()})
+            {aisle:sum(not self.model.space_states[sid].unavailable for sid in ids) for aisle,(ids,_) in static.items()})
 
     def plan_search(self,agent,report):
         """Route to/through a promising aisle after local offers were declined.
@@ -75,7 +75,7 @@ class AisleInformationService:
         if agent.information_aisle_id in positive and agent.route:return True
         static=self._prepare(agent)
         targets={n for a in positive for n in nav.aisle_nodes[a]}
-        distances=nav.distances((agent.x_m,agent.y_m),targets)
+        distances=nav.distances((agent.x_m,agent.y_m),targets,heading=getattr(agent,'routing_heading',None))
         def score(aisle):
             approach=min(distances[n] for n in nav.aisle_nodes[aisle])/self.model.search_speed_m_per_s
             value=static[aisle][1]
@@ -86,7 +86,7 @@ class AisleInformationService:
         # Stable static ID tie break, never hidden free-stall position.
         aisle=min(positive,key=lambda a:(-score(a),min(distances[n] for n in nav.aisle_nodes[a]),a))
         entry,other=sorted(nav.aisle_nodes[aisle],key=lambda n:(distances[n],n))
-        agent.route=nav.route((agent.x_m,agent.y_m),entry)+nav.route(nav.positions[entry],other)
+        agent.route=nav.route((agent.x_m,agent.y_m),entry,heading=getattr(agent,'routing_heading',None))+nav.route(nav.positions[entry],other)
         agent.patrol_goal=other
         agent.information_aisle_id=aisle
         agent.information_route_changes+=1

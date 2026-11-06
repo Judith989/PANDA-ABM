@@ -40,6 +40,20 @@ class ParkingSpace:
     distance_to_exit_a_m: float | None = None
     distance_to_exit_b_m: float | None = None
 
+    parking_kind: str | None = None
+    time_limit_minutes: float | None = None
+    exit_distances_m: Mapping[str, float] = field(default_factory=dict)
+
+    def exit_distance(self, point_id):
+        legacy = getattr(self, f'distance_to_{point_id}_m', None)
+        return legacy if legacy is not None else self.exit_distances_m.get(point_id, 0.0)
+
+    def permits_planned_stay(self, attributes, walking_speed_m_s=1.4, walking_distance_m=None):
+        if self.time_limit_minutes is None: return True
+        import math
+        walk = math.dist((self.x_m, self.y_m), attributes.destination) if walking_distance_m is None else walking_distance_m
+        return attributes.expected_dwell_duration_s + 2*walk/walking_speed_m_s <= self.time_limit_minutes*60 + 1e-9
+
     def is_compatible_with_vehicle(self, vehicle_type: str) -> bool:
         """Return whether a vehicle type can physically use this space.
 
@@ -98,6 +112,9 @@ def parking_space_from_lot_config_slot(slot: Mapping[str, object]) -> ParkingSpa
         reserved_type="reserved" if bool(slot.get("is_reserved")) else None,
         unavailable=bool(slot.get("is_blocked")) or bool(slot.get("is_unavailable")),
         price_per_hour=float(slot.get("price_per_hour", 0.0)),
+        time_limit_minutes=slot.get('time_limit_minutes'),
+        parking_kind=slot.get('parking_kind'),
+        exit_distances_m={k[len('distance_to_'):-2]:float(v) for k,v in slot.items() if k.startswith('distance_to_') and k.endswith('_m') and v is not None},
         distance_to_door_1_m=slot.get("distance_to_door_1_m"),
         distance_to_door_2_m=slot.get("distance_to_door_2_m"),
         distance_to_exit_a_m=slot.get("distance_to_exit_a_m"),

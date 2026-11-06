@@ -1,0 +1,18 @@
+const assert=require('node:assert/strict');require('../dashboard/follow-camera.js');
+const F=globalThis.PandaFollowCamera;
+assert.equal(F.selectedDriver('D0000','slot:P-01-003'),'D0000');
+assert.equal(F.selectedDriver('','pedestrian:D0001'),'D0001');
+assert.equal(F.selectedDriver('','slot:P-01-003'),null);
+const calls=[],messages=[];const C={Matrix4:{IDENTITY:'world'},SceneMode:{SCENE3D:3},Cartesian3:{distance:(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z),clone:p=>({...p})},HeadingPitchRange:class{constructor(h,p,r){this.heading=h;this.pitch=p;this.range=r;}}};
+const viewer={trackedEntity:'old',scene:{mode:3,morphTo3D(){this.mode=3;}},camera:{heading:0,pitch:-.65,positionWC:{x:0,y:-32,z:0},cancelFlight(){calls.push('cancel');},lookAt(p,o){calls.push({p:{...p},o});this.positionWC={x:p.x,y:p.y-o.range,z:p.z};},lookAtTransform(t){calls.push({reset:t});}}};
+const follow=F.create(C,viewer,s=>messages.push(s));
+follow.update({enabled:true,id:'D0000',kind:'vehicle',position:{x:0,y:0,z:0}});
+assert.equal(calls.at(-1).o.range,32);assert.equal(viewer.trackedEntity,undefined);
+follow.update({enabled:true,id:'D0000',kind:'vehicle',position:{x:5,y:0,z:0}});
+assert.deepEqual(calls.at(-1).p,{x:5,y:0,z:0});assert.equal(calls.at(-1).o.range,32);
+follow.update({enabled:true,id:'D0000',kind:'pedestrian',position:{x:6,y:0,z:0}});assert.equal(calls.at(-1).o.range,14);
+follow.update({enabled:true,id:'D0000',kind:'destination',position:{x:10,y:0,z:0},label:'at Door 1'});assert(messages.at(-1).includes('Door 1'));
+follow.update({enabled:false});assert.deepEqual(calls.at(-1),{reset:'world'});
+follow.update({enabled:true,id:'D0001',waiting:true,arrival:'00:20'});assert(messages.at(-1).includes('00:20'));
+follow.update({enabled:true,id:'D0000',finished:true});assert(messages.at(-1).includes('has left'));
+console.log('Camera follow: selection survives space inspection; camera recenters on moving target and pedestrian; stop/wait/departure statuses verified.');

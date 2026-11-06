@@ -20,8 +20,9 @@ def test_factory_references_follow_chosen_door_exit_and_walking_limits():
                   and s.is_compatible_with_vehicle(a.vehicle_type)
                   and (not s.accessible or a.accessibility_eligibility)
                   and (not s.reserved_type or a.permit_type == (s.permit_requirement or s.reserved_type))
-                  and (a.max_walking_distance_m is None or math.dist((s.x_m,s.y_m),a.destination)<=a.max_walking_distance_m)]
-        assert r.r_walk_m == pytest.approx(median(math.dist((s.x_m,s.y_m),a.destination) for s in usable))
+                  and math.isfinite(facility.walking_distance(s,a))
+                  and (a.max_walking_distance_m is None or facility.walking_distance(s,a)<=a.max_walking_distance_m)]
+        assert r.r_walk_m == pytest.approx(median(facility.walking_distance(s,a) for s in usable))
         assert r.r_exit_m == pytest.approx(median(getattr(s,f'distance_to_{a.preferred_exit_id}_m') for s in usable))
         assert r.reference_space_count == len(usable)
         assert r.r_exit_m > 0

@@ -23,6 +23,9 @@ class AisleNetwork:
         self.aisle_spaces = {}
         self.space_aisle = {}
         self._point_nodes = {}
+        if facility.aisle_network is not None:
+            self._load_explicit(facility)
+            return
         groups = defaultdict(list)
         for space in facility.spaces:
             groups[space.module_id].append(space)
@@ -71,6 +74,35 @@ class AisleNetwork:
         self._squared=(self._vectors*self._vectors).sum(axis=1)
         self._path_cache=OrderedDict()
 
+    def _load_explicit(self, facility):
+        data=facility.aisle_network
+        if data.get('directed'): self.graph = nx.DiGraph()
+        mapping={key:self._node(xy) for key,xy in data['nodes'].items()}
+        for a,b in data['edges']: self._edge(mapping[a],mapping[b])
+        self.aisle_nodes={key:tuple(mapping[n] for n in pair) for key,pair in data['aisles'].items()}
+        self.restricted_turns={tuple(mapping[n] for n in turn) for turn in data.get('turn_restrictions',[])}
+        self.patrol_nodes=sorted({n for pair in self.aisle_nodes.values() for n in pair})
+        for space in facility.spaces:
+            access=data['space_access'][space.space_id]
+            stall=self._node((space.x_m,space.y_m))
+            self._edge(mapping[access['node']],stall)
+            if self.graph.is_directed(): self._edge(stall,mapping[access['node']])
+            self.space_nodes[space.space_id]=stall
+            self.space_aisle[space.space_id]=access['aisle']
+        self.aisle_spaces={aid:tuple(sid for sid,a in self.space_aisle.items() if a==aid) for aid in self.aisle_nodes}
+        self.exit_nodes=[]
+        for pid,point in zip(facility.entry_point_ids+facility.exit_point_ids,facility.entry_points+facility.exit_points):
+            node=self._node(point)
+            self._edge(node,mapping[data['access_nodes'][pid]])
+            if self.graph.is_directed(): self._edge(mapping[data['access_nodes'][pid]],node)
+            self.exit_nodes.append(node)
+        if not (nx.is_strongly_connected(self.graph) if self.graph.is_directed() else nx.is_connected(self.graph)): raise ValueError('Disconnected or not strongly connected aisle network')
+        self._edges=list(self.graph.edges())
+        self._starts=np.array([self.positions[a] for a,b in self._edges])
+        self._vectors=np.array([self.positions[b] for a,b in self._edges])-self._starts
+        self._squared=(self._vectors*self._vectors).sum(axis=1)
+        self._path_cache=OrderedDict()
+
     def _node(self, point):
         point=tuple(float(v) for v in point);key=tuple(round(v,8) for v in point)
         if key not in self._point_nodes:
@@ -103,9 +135,11 @@ class AisleNetwork:
         feet=self._starts+t[:,None]*self._vectors
         squared=((feet-position)**2).sum(axis=1)
         i=int(np.argmin(squared));a,b=self._edges[i];foot=tuple(feet[i]);distance=float(np.sqrt(squared[i]))
-        return [(n,distance+math.dist(foot,self.positions[n]),foot) for n in (a,b)]
+        ends=(b,) if self.graph.is_directed() and not self.graph.has_edge(b,a) else (a,b)
+        return [(n,distance+math.dist(foot,self.positions[n]),foot) for n in ends]
 
-    def distances(self,position,targets=None):
+    def distances(self,position,targets=None,heading=None):
+        if heading is not None or getattr(self,'restricted_turns',None):return self._restricted_paths(position,heading)[0]
         anchors=self._anchors(position)
         # Multi-source Dijkstra with nonzero source costs, without mutating graph.
         import heapq
@@ -123,15 +157,63 @@ class AisleNetwork:
                     dist[neighbor]=new;heapq.heappush(queue,(new,neighbor))
         return dist
 
-    def route(self,position,node):
+    def route(self,position,node,heading=None):
+        if heading is not None or getattr(self,'restricted_turns',None):
+            lengths,paths=self._restricted_paths(position,heading)
+            if node not in paths:raise ValueError('No route satisfying turn restrictions')
+            return paths[node]
         if node not in self._path_cache:
-            self._path_cache[node]=nx.single_source_dijkstra(self.graph,node)
+            self._path_cache[node]=nx.single_source_dijkstra(self.graph.reverse(copy=False) if self.graph.is_directed() else self.graph,node)
             if len(self._path_cache)>64:self._path_cache.popitem(last=False)
         self._path_cache.move_to_end(node)
         lengths,paths=self._path_cache[node]
         anchor,_,foot=min(self._anchors(position),key=lambda a:a[1]+lengths[a[0]])
         return [foot]+[self.positions[n] for n in reversed(paths[anchor])]
 
-    def next_patrol(self,position,visits):
-        distances=self.distances(position)
-        return min(self.patrol_nodes,key=lambda n:(visits.get(n,0),distances[n],n))
+    def _restricted_paths(self,position,heading=None):
+        import heapq
+        cache=getattr(self,'_direction_cache',None)
+        if cache is None:self._direction_cache=OrderedDict();cache=self._direction_cache
+        key=(tuple(position),tuple(heading) if heading is not None else None,len(self.positions))
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+        queue=[];costs={};state_paths={};best={};paths={}
+        stalls=set(self.space_nodes.values())
+        for n,cost,foot in self._anchors(position):
+            previous=-1
+            if heading is not None and n not in stalls:
+                delta=tuple(self.positions[n][i]-position[i] for i in range(2));length=math.hypot(*delta)
+                if length>1e-3 and sum(delta[i]*heading[i] for i in range(2))/length<-.1:continue
+                incoming=self.graph.predecessors(n) if self.graph.is_directed() else self.graph.neighbors(n)
+                options=[]
+                for neighbor in incoming:
+                    if neighbor in stalls:continue
+                    vector=tuple(self.positions[n][i]-self.positions[neighbor][i] for i in range(2));norm=math.hypot(*vector)
+                    if norm>1e-3:options.append((sum(vector[i]*heading[i] for i in range(2))/norm,neighbor))
+                if options and max(options)[0]>.8:previous=max(options)[1]
+            state=(previous,n);costs[state]=cost;state_paths[state]=[foot,self.positions[n]];heapq.heappush(queue,(cost,previous,n))
+        while queue:
+            cost,previous,node=heapq.heappop(queue);state=(previous,node)
+            if cost>costs[state]+1e-9:continue
+            if cost<best.get(node,float('inf')):best[node]=cost;paths[node]=state_paths[state]
+            for neighbor,edge in self.graph[node].items():
+                road_degree=sum(n not in stalls for n in self.graph[node])
+                turnaround=heading is not None and node not in stalls and road_degree<=1
+                if (neighbor==previous and not turnaround) or (previous,node,neighbor) in getattr(self,'restricted_turns',set()):continue
+                if heading is not None and previous>=0 and not turnaround and edge['weight']>=1e-3:
+                    incoming=tuple(self.positions[node][i]-self.positions[previous][i] for i in range(2))
+                    outgoing=tuple(self.positions[neighbor][i]-self.positions[node][i] for i in range(2))
+                    norm=math.hypot(*incoming)*math.hypot(*outgoing)
+                    if norm and sum(incoming[i]*outgoing[i] for i in range(2))/norm<-.8:continue
+                predecessor=previous if heading is not None and edge['weight']<1e-3 else node
+                new=cost+edge['weight'];target=(predecessor,neighbor)
+                if new<costs.get(target,float('inf')):
+                    costs[target]=new;state_paths[target]=state_paths[state]+[self.positions[neighbor]];heapq.heappush(queue,(new,predecessor,neighbor))
+        cache[key]=(best,paths)
+        if len(cache)>8:cache.popitem(last=False)
+        return best,paths
+
+    def next_patrol(self,position,visits,heading=None):
+        distances=self.distances(position,heading=heading)
+        return min((n for n in self.patrol_nodes if n in distances),key=lambda n:(visits.get(n,0),distances[n],n))

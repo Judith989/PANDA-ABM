@@ -1,0 +1,10 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('dashboard/app.js','utf8');const fn=source.slice(source.indexOf('function slotAngle('),source.indexOf('function local('));
+const context={};vm.runInNewContext(fn,context);const angle=context.slotAngle;
+assert.equal(angle({heading_deg:0}),0);
+assert.equal(angle({heading_deg:90}),Math.PI/2);
+assert.equal(angle({heading_deg:90,heading_reference:'clockwise_from_north'}),0);
+assert.equal(angle({heading_deg:0,heading_reference:'clockwise_from_north'}),Math.PI/2);
+assert.ok(Math.abs(angle({heading_deg:150,heading_reference:'clockwise_from_north'})+Math.PI/3)<1e-12);
+assert.ok(source.includes('-slotAngle(bay)')&&source.includes('-slotAngle(slot.slot)'));
+console.log('Slot orientation: 6 geometry/vehicle-alignment checks passed.');

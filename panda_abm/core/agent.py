@@ -23,20 +23,40 @@ class DriverAgent(Agent):
         self.last_tick_s=self.arrival_time_s;self.attempt_ready_s=0.;self._candidate_times={};self._candidate_probabilities={}
         self.information_aisle_id=None;self.information_reports_received=0;self.information_route_changes=0
         self.remote_targets_selected=0;self._observations_by_id={}
+        self.maneuver_remaining_s=0.;self.traffic_speed_m_s=0.
 
     def log(self,event,**kwargs):self.model.event_logger.log(event,self.model.clock_s,agent=self,**kwargs)
+
+    @property
+    def routing_heading(self):
+        return getattr(self,'vehicle_heading',None) if self.model.traffic else None
 
     def step(self):
         now=self.model.clock_s
         if now<self.arrival_time_s or self.state in (DriverState.LEFT,DriverState.ABANDONED):return
         dt=max(0.,now-self.last_tick_s);self.last_tick_s=now
+        if self.model.traffic:self.traffic_speed_m_s=0.
         if self.state==DriverState.NOT_ARRIVED:
+            if self.model.traffic and not self.model.traffic.can_enter(self):return
             self.state=DriverState.ARRIVING;self.log('AgentArrived');self.search_started_s=now;self.state=DriverState.SEARCHING
             self.log('SearchStarted');dt=0.
         if self.state in (DriverState.SEARCHING,DriverState.TARGETING):
             self.search_time_s=now-self.search_started_s
             if self.search_time_s>=self.model.max_search_time_s:
-                self.search_ended_s=now;self.state=DriverState.ABANDONED;self.route=[];self.log('SearchAbandoned');return
+                from panda_abm.core.bay_clearance import drop_reservation
+                if getattr(self,'bay_entry_started',False):self.departure_space_id=self.chosen_space_id
+                else:drop_reservation(self)
+                self.search_ended_s=now;self.state=DriverState.ABANDONED;self.route=[];self.log('SearchAbandoned')
+                if self.model.traffic:
+                    self.abandoning=True;self.chosen_space_id=None;self.state=DriverState.EXITING
+                    exits=self.model.facility.exit_points;ids=self.model.facility.exit_point_ids
+                    if exits:
+                        index=ids.index(self.attributes.preferred_exit_id) if self.attributes.preferred_exit_id in ids else 0
+                        # Backing out of an interrupted bay maneuver is allowed;
+                        # a road-direction constraint must not force deeper entry.
+                        route_heading=None if getattr(self,'bay_entry_started',False) else self.routing_heading
+                        self.route=self.model.navigation.route((self.x_m,self.y_m),self.model.navigation._node(exits[index]),heading=route_heading)
+                return
         if self.state==DriverState.SEARCHING:
             self._advance_route(dt)
             if not self.route and self.patrol_goal is not None:
@@ -47,22 +67,39 @@ class DriverAgent(Agent):
                 self.next_decision_s=now+self.model.decision_interval_s
                 self._search_step()
             if self.state==DriverState.SEARCHING and not self.route:
-                self.patrol_goal=self.model.navigation.next_patrol((self.x_m,self.y_m),self.aisle_visits)
-                self.route=self.model.navigation.route((self.x_m,self.y_m),self.patrol_goal)
+                self.patrol_goal=self.model.navigation.next_patrol((self.x_m,self.y_m),self.aisle_visits,heading=self.routing_heading)
+                self.route=self.model.navigation.route((self.x_m,self.y_m),self.patrol_goal,heading=self.routing_heading)
             return
         if self.state==DriverState.TARGETING:
+            had_route=bool(self.route)
             self._advance_route(dt)
+            if not self.route and not getattr(self,'bay_entry_started',False):
+                from panda_abm.core.bay_clearance import begin_maneuver
+                if not begin_maneuver(self):
+                    target=self.model.facility.space_by_id[self.chosen_space_id]
+                    self.log('SpaceClaimAttempted',space=target)
+                    self.log('SpaceClaimFailed',space=target,details={'reason':'occupied_closed_or_maneuver_in_progress','position':'aisle_side_before_bay_entry'})
+                    self._lost_target();return
+                return
+            if self.model.traffic:
+                if self.route:return
+                # Maneuver starts only after actual route completion, including
+                # traffic delay. Never claim using an obsolete arrival estimate.
+                if had_route:return
+                self.maneuver_remaining_s=max(0.,self.maneuver_remaining_s-dt)
+                if self.maneuver_remaining_s>1e-9:return
             if self.route or now+1e-9<self.attempt_ready_s:return
             target=self.model.facility.space_by_id[self.chosen_space_id]
             self.log('SpaceClaimAttempted',space=target)
             if self.model.try_park(self,target.space_id):return
-            self.lost_space_events+=1;self.rejected_spaces+=1
-            self.chosen_space_id=None;self.chosen_module=None;self.state=DriverState.SEARCHING
-            self.next_decision_s=now;self.log('LostSpace',space=target);return
+            self._lost_target();return
         if self.state==DriverState.PARKED:
             self.state=DriverState.WALKING_TO_DESTINATION;self.log('WalkingToDestinationStarted')
         if self.state==DriverState.WALKING_TO_DESTINATION:
-            if now+1e-9>=self.destination_ready_s:
+            from panda_abm.core.pedestrian_movement import advance_walk
+            reached=advance_walk(self,dt,now) if self.model.facility.pedestrian_network is not None else now+1e-9>=self.destination_ready_s
+            if reached:
+                if self.model.facility.pedestrian_network is not None:self.destination_ready_s=now
                 self.state=DriverState.AT_DESTINATION;self.dwell_end_s=now+self.attributes.expected_dwell_duration_s
                 self.log('DestinationReached')
             return
@@ -71,14 +108,26 @@ class DriverAgent(Agent):
             if now+1e-9>=self.dwell_end_s:
                 self.state=DriverState.RETURNING_TO_VEHICLE
                 self.return_ready_s=now+self.walking_distance_m/self.model.walk_speed_m_per_s
+                if self.model.facility.pedestrian_network is not None:
+                    from panda_abm.core.pedestrian_movement import start_walk
+                    start_walk(self,returning=True)
                 self.log('ReturningToVehicleStarted')
             return
         if self.state==DriverState.RETURNING_TO_VEHICLE:
-            if now+1e-9>=self.return_ready_s:self._start_exiting()
+            from panda_abm.core.pedestrian_movement import advance_walk
+            reached=advance_walk(self,dt,now) if self.model.facility.pedestrian_network is not None else now+1e-9>=self.return_ready_s
+            if reached:
+                if self.model.facility.pedestrian_network is not None:self.return_ready_s=now
+                self._start_exiting()
             return
         if self.state==DriverState.EXITING:
             self._advance_route(dt,count_search=False)
-            if not self.route:self.state=DriverState.LEFT;self.log('AgentExited')
+            from panda_abm.core.bay_clearance import release_departure_if_clear
+            release_departure_if_clear(self)
+            if not self.route:
+                release_departure_if_clear(self,force=True)
+                self.state=DriverState.ABANDONED if getattr(self,'abandoning',False) else DriverState.LEFT
+                self.log('AgentExited')
 
     @property
     def information_mode(self):
@@ -92,6 +141,9 @@ class DriverAgent(Agent):
             self.log('InformationReceived',details=dict(information_mode='aisle',report_time_s=report.observed_at_s,
                 free_counts=report.free_counts,compatible_capacity=report.compatible_capacity))
         observations=self.model.perceive(self)
+        self.last_visible_space_ids=[o.space.space_id for o in observations if o.distance_from_driver_m<=self.model.perception_radius_m]
+        self.last_visible_free_space_ids=[o.space.space_id for o in observations if o.distance_from_driver_m<=self.model.perception_radius_m and o.perceived_available]
+        self.last_observation_s=self.model.clock_s
         self._observations_by_id={o.space.space_id:o for o in observations}
         if self.information_mode=='space':
             self.information_reports_received+=1
@@ -106,7 +158,7 @@ class DriverAgent(Agent):
         self._candidate_times={};self._candidate_probabilities={}
         if feasible:
             distances=self.model.navigation.distances((self.x_m,self.y_m),
-                [self.model.navigation.space_nodes[s.space_id] for s in feasible])
+                [self.model.navigation.space_nodes[s.space_id] for s in feasible],heading=self.routing_heading)
             forecast={o.space.space_id:o.forecast_available_probability for o in observations}
             for s in feasible:
                 travel=distances[self.model.navigation.space_nodes[s.space_id]]/self.model.search_speed_m_per_s
@@ -136,6 +188,7 @@ class DriverAgent(Agent):
             allow_illegal_alternatives=self.model.allow_illegal_alternatives,
             rng_seed=self.model.seed_for_driver_step(self.driver_id,self.search_time_s),preferred_exit_id=self.attributes.preferred_exit_id,
             search_speed_m_per_s=self.model.search_speed_m_per_s,max_walking_distance_m=self.attributes.max_walking_distance_m,
+            walking_distances_m={sid:self.model.facility.walking_distance(self.model.facility.space_by_id[sid],self.attributes) for sid in self.last_candidate_space_ids} if self.model.facility.pedestrian_network is not None else {},
             approach_times_s=self._candidate_times,availability_probabilities=self._candidate_probabilities,
             decision_interval_s=self.model.decision_interval_s,failure_delay_s=self.model.failure_delay_s,
             remaining_search_time_s=max(0.,self.model.max_search_time_s-self.search_time_s),
@@ -146,10 +199,13 @@ class DriverAgent(Agent):
         self.chosen_space_id=target.space_id;self.chosen_module=target.module_id
         if self.last_module is not None and self.last_module!=target.module_id:self.module_switches+=1
         self.last_module=target.module_id;self.utility_of_chosen_action=decision.chosen_utility
-        self.route=self.model.navigation.route((self.x_m,self.y_m),self.model.navigation.space_nodes[target.space_id])
+        from panda_abm.core.bay_clearance import access_node
+        self.bay_entry_started=False
+        self.route=self.model.navigation.route((self.x_m,self.y_m),access_node(self.model,target.space_id),heading=self.routing_heading)
         self.patrol_goal=None;self.state=DriverState.TARGETING
         self.information_aisle_id=None
         self.attempt_ready_s=self.model.clock_s+self._candidate_times[target.space_id]
+        self.maneuver_remaining_s=self.model.parking_maneuver_s
         observation=self._observations_by_id.get(target.space_id)
         distance=math.dist((self.x_m,self.y_m),(target.x_m,target.y_m))
         if distance>self.model.perception_radius_m+1e-9:self.remote_targets_selected+=1
@@ -160,30 +216,59 @@ class DriverAgent(Agent):
 
     def _advance_route(self,dt,count_search=True):
         budget=self.model.search_speed_m_per_s*dt
+        if self.model.traffic:budget=self.model.traffic.distance_budget(self,dt)
+        moved=0.
         while self.route:
             x,y=self.route[0];dx=x-self.x_m;dy=y-self.y_m;distance=math.hypot(dx,dy)
-            if distance<1e-9:self.route.pop(0);continue
+            # Imported lat/lon access coordinates can differ from rounded graph
+            # vertices by micrometres. Such a connector must not rotate a car or
+            # prevent it leaving at the facility boundary.
+            if distance<1e-3:
+                if distance>1e-9:
+                    self.x_m,self.y_m=x,y
+                    self.path.append((x,y))
+                    if count_search:self.search_distance_m+=distance
+                self.route.pop(0);continue
             if budget<=1e-9:break
-            move=min(distance,budget);self.x_m+=dx/distance*move;self.y_m+=dy/distance*move;budget-=move
+            move=min(distance,budget)
+            from panda_abm.core.bay_clearance import limit_motion
+            safe=limit_motion(self,(dx/distance,dy/distance),move)
+            blocked=safe<move-1e-9;move=safe
+            self.x_m+=dx/distance*move;self.y_m+=dy/distance*move;budget-=move
+            if move>1e-7:self.vehicle_heading=(dx/distance,dy/distance)
+            moved+=move
             if count_search:self.search_distance_m+=move
             self.path.append((self.x_m,self.y_m))
             if move>=distance-1e-9:self.route.pop(0)
+            if blocked:break
+        self.traffic_speed_m_s=moved/dt if dt else 0.
         if dt and self.state in (DriverState.SEARCHING,DriverState.TARGETING):
             self.log('VehicleMovingToTarget' if self.state==DriverState.TARGETING else 'VehicleSearchingAisle')
 
     def park_at(self,space,utility):
+        from panda_abm.core.bay_clearance import drop_reservation
+        drop_reservation(self)
         self.state=DriverState.PARKED;self.chosen_space_id=space.space_id;self.chosen_module=space.module_id
         self.utility_of_chosen_action=utility;self.parking_time_s=self.model.clock_s
         self.search_ended_s=self.parking_time_s;self.search_time_s=self.search_ended_s-self.search_started_s
-        self.walking_distance_m=math.dist((space.x_m,space.y_m),self.attributes.destination)
+        self.walking_distance_m=self.model.facility.walking_distance(space,self.attributes)
         self.x_m=space.x_m;self.y_m=space.y_m;self.path.append((self.x_m,self.y_m))
+        geometry=(self.model.facility.aisle_network or {}).get('bay_geometry',{}).get(space.space_id,{})
+        angle=math.radians(geometry.get('heading_deg',0))
+        if geometry.get('heading_reference')=='clockwise_from_north':angle=math.pi/2-angle
+        self.vehicle_heading=(math.cos(angle),math.sin(angle))
         self.destination_ready_s=self.parking_time_s+self.walking_distance_m/self.model.walk_speed_m_per_s
+        if self.model.facility.pedestrian_network is not None:
+            from panda_abm.core.pedestrian_movement import start_walk
+            self.walking_route_data=self.model.facility.walking_route(space,self.attributes)
+            if self.walking_route_data is None:raise ValueError('Parking target has no walking route')
+            start_walk(self)
         self.violation=bool((space.accessible and not self.attributes.accessibility_eligibility) or
             (space.reserved_type and self.attributes.permit_type!=(space.permit_requirement or space.reserved_type)))
         self.log('SpaceClaimSucceeded',space=space,utility=utility);self.log('ParkingStarted',space=space,utility=utility)
 
     def _start_exiting(self):
-        if self.chosen_space_id:self.model.release_parking(self,self.chosen_space_id)
+        self.departure_space_id=self.chosen_space_id
         self.state=DriverState.EXITING;self.log('ParkingEnded',space_id=self.chosen_space_id)
         exits=self.model.facility.exit_points
         if exits:
@@ -192,3 +277,11 @@ class DriverAgent(Agent):
             node=self.model.navigation._node(exits[index])
             self.route=self.model.navigation.route((self.x_m,self.y_m),node)
         else:self.route=[]
+
+    def _lost_target(self):
+        from panda_abm.core.bay_clearance import drop_reservation
+        target=self.model.facility.space_by_id[self.chosen_space_id]
+        drop_reservation(self);self.lost_space_events+=1;self.rejected_spaces+=1
+        self.chosen_space_id=None;self.chosen_module=None;self.state=DriverState.SEARCHING;self.route=[]
+        self.bay_entry_started=False;self.next_decision_s=self.model.clock_s
+        self.log('LostSpace',space=target)
