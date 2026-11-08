@@ -11,4 +11,9 @@ const observed=[{phase:'to_door',start_s:1,end_s:2,from_m:[0,0],to_m:[1.4,0],sou
 assert.equal(P.position(observed,2.5).x,1.4);assert.equal(P.position(observed,2.5).y,0);
 assert.equal(P.position(observed,3.5).x,1.4);assert.ok(Math.abs(P.position(observed,3.5).y-.7)<1e-12);
 assert.equal(P.position(observed,4).y,1.4);assert.equal(P.position(observed,4.1),null);
+// A live walk recorded only up to the previous second stays visible while the driver is walking.
+const partial=[{phase:'to_door',start_s:10,end_s:11,from_m:[0,0],to_m:[1.4,0],source:'simulated_network_walk'}];
+assert.equal(P.position(partial,11.6),null);
+assert.equal(P.position(partial,11.6,true).x,1.4);
+assert.equal(P.position(partial,9,true),null);
 console.log('Network bends, stationary waits and live-frame endpoint display passed.');

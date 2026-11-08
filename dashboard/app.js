@@ -492,7 +492,7 @@ function render() {
       if(Math.hypot(...direction)>1e-8)e.orientation=C.Transforms.headingPitchRollQuaternion(local(p.x,p.y,.06),new C.HeadingPitchRoll(-Math.atan2(direction[1],direction[0]),0,0));
       if(p.state==='parked'){const bay=state.slotEntities.get(p.space)?.slot;if(bay)e.orientation=C.Transforms.headingPitchRollQuaternion(local(p.x,p.y,.06),new C.HeadingPitchRoll(-slotAngle(bay),0,0));}
     }
-    const person=state.pedestrians.get(track.id),pose=window.PandaPedestrians.position(track.walking_intervals,t);
+    const person=state.pedestrians.get(track.id),pose=window.PandaPedestrians.position(track.walking_intervals,t,walking);
     person.show=Boolean(pose&&$('show-pedestrians').checked);
     if(person.show){
       person.position=local(pose.x,pose.y,.03);

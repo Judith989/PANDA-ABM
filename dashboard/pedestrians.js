@@ -1,7 +1,15 @@
 /* Pedestrian display follows the ABM's walking timestamps, independent of car paths. */
 (function(root){
-  function position(intervals,t){
-    const leg=(intervals??[]).find(p=>p.end_s>p.start_s&&t>=p.start_s&&(t<p.end_s||(p.source==='simulated_network_walk'&&t===p.end_s&&p===(intervals??[]).at(-1))));if(!leg)return null;
+  function position(intervals,t,stillWalking=false){
+    let leg=(intervals??[]).find(p=>p.end_s>p.start_s&&t>=p.start_s&&(t<p.end_s||(p.source==='simulated_network_walk'&&t===p.end_s&&p===(intervals??[]).at(-1))));
+    if(!leg&&stillWalking){
+      // Live frames record a walk up to the previous engine second. While the
+      // driver is still walking, hold them at the latest recorded point.
+      const last=(intervals??[]).filter(p=>p.start_s<=t).at(-1);
+      if(last){const dx=last.to_m[0]-last.from_m[0],dy=last.to_m[1]-last.from_m[1],d=Math.hypot(dx,dy);
+        return {x:last.to_m[0],y:last.to_m[1],direction:d?[dx/d,dy/d]:[0,0],phase:last.phase,elapsed_s:t-last.start_s,leg:{...last,waiting:true}};}
+    }
+    if(!leg)return null;
     const f=(t-leg.start_s)/(leg.end_s-leg.start_s),dx=leg.to_m[0]-leg.from_m[0],dy=leg.to_m[1]-leg.from_m[1],d=Math.hypot(dx,dy);
     return {x:leg.from_m[0]+f*dx,y:leg.from_m[1]+f*dy,direction:d?[dx/d,dy/d]:[0,0],phase:leg.phase,elapsed_s:t-leg.start_s,leg};
   }
