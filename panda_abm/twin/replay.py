@@ -51,11 +51,12 @@ def validate_settings(settings):
     if s['information'] not in ('unaided','aisle','space'):raise ValueError('Unknown information condition')
     if type(s['traffic_enabled']) is not bool:raise ValueError('traffic_enabled must be true or false')
     duration=s['simulation_duration_s']
-    if duration is not None and (type(duration) is not int or not 60<=duration<=21600):
-        raise ValueError('Simulation duration must be 60–21600 whole seconds, or null for full trips')
+    if duration is not None and (type(duration) is not int or not 10<=duration<=21600):
+        raise ValueError('Simulation duration must be 10–21600 whole seconds, or null for full trips')
     if s['background_departures'] not in ('static','residual'):raise ValueError('Unknown background departure model')
     if s['visit_profile'] not in ('baseline','short','near_limit','long','mixed'):raise ValueError('Unknown visit profile')
-    if s['parking_policy'] not in ('configured','unrestricted','street_2h'):raise ValueError('Unknown parking policy')
+    from panda_abm.twin.urban_scenarios import PARKING_POLICIES
+    if s['parking_policy'] not in PARKING_POLICIES:raise ValueError('Unknown parking policy')
     if s['through_traffic'] not in ('off','low','medium','high'):raise ValueError('Unknown through-traffic level')
     if s['through_traffic']!='off' and not s['traffic_enabled']:raise ValueError('Through traffic requires traffic interactions')
     if type(s['through_demand_s']) is not int or not 60<=s['through_demand_s']<=21600:raise ValueError('Through demand must last 60–21600 s')
@@ -72,7 +73,7 @@ def validate_settings(settings):
         ped=s['environment']['config'].get('pedestrian_network')
         if ped and any(e['kind']=='crossing' for e in ped['edges']) and not s['traffic_enabled']:raise ValueError('Enable traffic interactions to simulate safe pedestrian crossings')
     count=s['initial_free_count']
-    if count is not None and (type(count) is not int or not 0<=count<=capacity):raise ValueError('Free count must be 0–1106')
+    if count is not None and (type(count) is not int or not 0<=count<=capacity):raise ValueError(f'Free count must be 0–{capacity} for this environment')
     for key in ('initial_free_space_ids','initial_occupied_space_ids','closed_space_ids'):
         ids=s[key]
         if ids is not None and (not isinstance(ids,list) or len(ids)>capacity or any(not isinstance(i,str) for i in ids) or len(set(ids))!=len(ids)):

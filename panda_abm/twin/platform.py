@@ -58,11 +58,18 @@ def simulate(settings, include_population=False):
     metrics = dict(search_s=mean(outcomes, 'search_s'), success_pct=100 * len(parked) / len(outcomes),
                    walk_m=mean(parked, 'walk_m'), exit_m=mean(parked, 'exit_distance_m'),
                    failed_claims=mean(outcomes, 'lost_claims'))
+    cohort=outcomes
     if horizon is not None:
         cohort=[o for o in outcomes if o['observed_arrival']]
         metrics.update(search_s=mean(cohort,'search_s'),
                        success_pct=100*len(parked)/len(cohort) if cohort else None,
                        failed_claims=mean(cohort,'lost_claims'))
+    traffic_snapshot=model.traffic.snapshot() if model.traffic else dict(enabled=False)
+    # Planner-facing congestion measures; None when traffic interactions are off.
+    metrics.update(entry_wait_s=mean(cohort,'entry_delay_s') if model.traffic else None,
+                   arrival_to_search_end_s=mean(cohort,'arrival_to_search_end_s') if model.traffic else None,
+                   traffic_delay_vehicle_s=traffic_snapshot['cumulative_delay_s'] if model.traffic else None,
+                   jam_episodes=float(len(traffic_snapshot['jam_episodes'])) if model.traffic else None)
     result=dict(segment_labels=traffic_segment_labels(facility,model.navigation),settings=settings, metrics=metrics, outcomes=outcomes,
                 population_sha256=population_hash, initial_occupancy_sha256=digest(initial),
                 config_sha256=(settings['environment']['config_sha256'] if settings['environment'] else hashlib.sha256((ROOT/'data/lot_config.json').read_bytes()).hexdigest()),
@@ -71,7 +78,7 @@ def simulate(settings, include_population=False):
                 wall_s=time.perf_counter()-start)
     from panda_abm.core.interventions import supply_snapshot
     result.update(supply=supply_snapshot(model), interventions=model.intervention_log,
-                  traffic=model.traffic.snapshot() if model.traffic else dict(enabled=False))
+                  traffic=traffic_snapshot)
     from panda_abm.twin.urban_scenarios import urban_outcomes
     result['urban_outcomes']=urban_outcomes(model)
     result['walking_measure']='pedestrian_network' if facility.pedestrian_network else 'euclidean'
@@ -81,8 +88,17 @@ def simulate(settings, include_population=False):
     return result
 
 
+STANDARD_METRICS = ('search_s', 'success_pct', 'walk_m', 'exit_m', 'failed_claims')
+TRAFFIC_METRICS = ('entry_wait_s', 'arrival_to_search_end_s', 'traffic_delay_vehicle_s', 'jam_episodes')
+# Settings a planning scenario may vary against the shared base scenario.
+PLANNING_KEYS = {'parking_policy', 'through_traffic', 'through_demand_s', 'arrival_interval_s', 'demand_duration_s',
+                 'population_size', 'visit_profile', 'background_departures', 'occupancy', 'information',
+                 'traffic_enabled', 'initial_free_count', 'closed_space_ids'}
+MAX_SCENARIO_RUNS = 240
+
+
 def validate_comparison(payload):
-    if not isinstance(payload, dict) or set(payload) - {'settings', 'models', 'replications'}:
+    if not isinstance(payload, dict) or set(payload) - {'settings', 'models', 'replications', 'scenarios'}:
         raise ValueError('Invalid comparison settings')
     from panda_abm.twin.replay import validate_settings
     settings = validate_settings(payload.get('settings', {}))
@@ -107,17 +123,17 @@ def interval(values, rng):
     return dict(mean=float(values.mean()), low=float(lo), high=float(hi), replications=len(values))
 
 
-def summarize_comparison(runs, models, seed):
+def summarize_comparison(runs, models, seed, keys=STANDARD_METRICS):
     rng = np.random.default_rng(seed)
     cells, effects = [], []
     for name in models:
         for info in ('unaided', 'aisle', 'space'):
             selected = [r for r in runs if r['settings']['model'] == name and r['settings']['information'] == info]
             cells.append(dict(model=name, information=info, metrics={k: interval([r['metrics'][k] for r in selected], rng)
-                for k in ('search_s', 'success_pct', 'walk_m', 'exit_m', 'failed_claims')}))
+                for k in keys}))
             if info == 'unaided':
                 continue
-            differences = {k: [] for k in ('search_s', 'success_pct', 'walk_m', 'exit_m', 'failed_claims', 'joint_search_walk_s')}
+            differences = {k: [] for k in (*keys, 'joint_search_walk_s')}
             jointly_parked = []
             for informed in selected:
                 baseline = next(r for r in runs if r['settings']['model'] == name
@@ -138,7 +154,83 @@ def summarize_comparison(runs, models, seed):
     return cells, effects
 
 
+def validate_scenarios(payload, settings, models, reps):
+    from panda_abm.twin.replay import validate_settings
+    scenarios = payload['scenarios']
+    if not isinstance(scenarios, list) or not 2 <= len(scenarios) <= 6:
+        raise ValueError('Choose two to six planning scenarios')
+    checked = []
+    for scenario in scenarios:
+        if not isinstance(scenario, dict) or set(scenario) != {'label', 'settings'}:
+            raise ValueError('Each scenario needs a label and settings')
+        label, overrides = scenario['label'], scenario['settings']
+        if not isinstance(label, str) or not label.strip() or len(label) > 80:
+            raise ValueError('Scenario labels must be 1–80 characters')
+        if not isinstance(overrides, dict) or set(overrides) - PLANNING_KEYS:
+            raise ValueError('Scenarios may vary only planning settings: ' + ', '.join(sorted(PLANNING_KEYS)))
+        validate_settings(settings | overrides)
+        checked.append(dict(label=label.strip(), settings=overrides))
+    if len({c['label'] for c in checked}) != len(checked):
+        raise ValueError('Scenario labels must be distinct')
+    if reps*len(models)*len(checked) > MAX_SCENARIO_RUNS:
+        raise ValueError(f'Reduce replications, models or scenarios: at most {MAX_SCENARIO_RUNS} simulations')
+    return checked
+
+
+def compare_scenarios(payload, progress=None):
+    """Planning comparison: each scenario changes chosen settings of one shared base.
+
+    Differences are scenario minus the first (reference) scenario within each seed.
+    Populations stay matched unless a scenario changes demand (arrivals, driver
+    count or visit profile); the result states which scenarios remained matched.
+    """
+    settings, models, reps = validate_comparison(payload)
+    scenarios = validate_scenarios(payload, settings, models, reps)
+    runs, base_fingerprint, matched = [], {}, {s['label']: True for s in scenarios}
+    start, total = time.perf_counter(), reps*len(models)*len(scenarios)
+    for offset in range(reps):
+        seed = settings['seed'] + offset
+        for name in models:
+            for index, scenario in enumerate(scenarios):
+                row = simulate(settings | scenario['settings'] | dict(seed=seed, model=name))
+                key = (row['population_sha256'], row['initial_occupancy_sha256'])
+                if index == 0:
+                    base_fingerprint[seed, name] = key
+                elif key != base_fingerprint[seed, name]:
+                    matched[scenario['label']] = False
+                row['scenario'] = scenario['label']
+                if settings['environment'] is not None:
+                    row['settings'] = row['settings'] | dict(environment=None, environment_sha256=settings['environment']['environment_sha256'])
+                runs.append(row)
+                if progress:
+                    progress(len(runs), total, name, scenario['label'], seed)
+    rng = np.random.default_rng(settings['seed'])
+    keys = STANDARD_METRICS + (TRAFFIC_METRICS if any(r['settings']['traffic_enabled'] for r in runs) else ())
+    cells, effects = [], []
+    for name in models:
+        reference = {r['settings']['seed']: r for r in runs if r['settings']['model'] == name and r['scenario'] == scenarios[0]['label']}
+        for scenario in scenarios:
+            selected = [r for r in runs if r['settings']['model'] == name and r['scenario'] == scenario['label']]
+            cells.append(dict(model=name, scenario=scenario['label'],
+                              metrics={k: interval([r['metrics'][k] for r in selected], rng) for k in keys}))
+            if scenario is scenarios[0]:
+                continue
+            base = lambda r, k: reference[r['settings']['seed']]['metrics'][k]
+            differences = {k: [None if r['metrics'][k] is None or base(r, k) is None else r['metrics'][k]-base(r, k)
+                               for r in selected] for k in keys}
+            effects.append(dict(model=name, scenario=scenario['label'], reference=scenarios[0]['label'],
+                                metrics={k: interval(v, rng) for k, v in differences.items()}))
+    return dict(schema_version=2, mode='scenarios', settings=settings, models=models, replications=reps,
+        scenarios=scenarios, runs=runs, cells=cells, effects=effects, matched_population=matched, metrics=list(keys),
+        runtime=runtime_versions(), wall_s=time.perf_counter()-start,
+        method=dict(difference='scenario minus reference scenario within seed', reference=scenarios[0]['label'],
+                    bootstrap_resamples=10000, interval='pointwise percentile 95%; no multiplicity adjustment',
+                    matched_population_note='Unmatched scenarios change demand, so their differences include population changes.'))
+
+
 def compare(payload, progress=None):
+    if isinstance(payload, dict) and 'scenarios' in payload:
+        return compare_scenarios(payload, progress)
     settings, models, reps = validate_comparison(payload)
     runs, fingerprints, populations = [], {}, {}
     start = time.perf_counter()
@@ -157,7 +249,8 @@ def compare(payload, progress=None):
                 runs.append(row)
                 if progress:
                     progress(len(runs), reps*len(models)*3, name, info, seed)
-    cells, effects = summarize_comparison(runs, models, settings['seed'])
+    keys = STANDARD_METRICS + (TRAFFIC_METRICS if settings['traffic_enabled'] else ())
+    cells, effects = summarize_comparison(runs, models, settings['seed'], keys)
     return dict(schema_version=1, settings=settings, models=models, replications=reps,
         runs=runs, populations=populations, cells=cells, effects=effects, runtime=runtime_versions(), wall_s=time.perf_counter()-start,
         method=dict(matched=True, difference='informed minus unaided within seed',

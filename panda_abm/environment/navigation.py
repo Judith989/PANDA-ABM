@@ -139,7 +139,14 @@ class AisleNetwork:
         return [(n,distance+math.dist(foot,self.positions[n]),foot) for n in ends]
 
     def distances(self,position,targets=None,heading=None):
-        if heading is not None or getattr(self,'restricted_turns',None):return self._restricted_paths(position,heading)[0]
+        if heading is not None or getattr(self,'restricted_turns',None):
+            best=self._restricted_paths(position,heading)[0]
+            if heading is not None and (not best or any(t not in best for t in targets or ())):
+                # No forward route (e.g. off-graph during a bay maneuver on a
+                # one-way grid): allow a turnaround rather than losing targets.
+                fallback=self._restricted_paths(position,None)[0]
+                best={**fallback,**best}
+            return best
         anchors=self._anchors(position)
         # Multi-source Dijkstra with nonzero source costs, without mutating graph.
         import heapq
@@ -160,6 +167,7 @@ class AisleNetwork:
     def route(self,position,node,heading=None):
         if heading is not None or getattr(self,'restricted_turns',None):
             lengths,paths=self._restricted_paths(position,heading)
+            if node not in paths and heading is not None:lengths,paths=self._restricted_paths(position,None)
             if node not in paths:raise ValueError('No route satisfying turn restrictions')
             return paths[node]
         if node not in self._path_cache:
@@ -214,6 +222,20 @@ class AisleNetwork:
         if len(cache)>8:cache.popitem(last=False)
         return best,paths
 
+    def on_bay_spur(self,position):
+        stalls=getattr(self,'_stall_nodes',None)
+        if stalls is None:stalls=self._stall_nodes=set(self.space_nodes.values())
+        return any(n in stalls for n,_,_ in self._anchors(position))
+
     def next_patrol(self,position,visits,heading=None):
         distances=self.distances(position,heading=heading)
-        return min((n for n in self.patrol_nodes if n in distances),key=lambda n:(visits.get(n,0),distances[n],n))
+        key=lambda n:(visits.get(n,0),distances[n],n)
+        goal=min((n for n in self.patrol_nodes if n in distances),key=key,default=None)
+        if heading is not None and (goal is None or distances[goal]<=1e-3):
+            # Facing out of the network (e.g. at a boundary access point) or no
+            # patrol point ahead: allow a turnaround.
+            distances=self._restricted_paths(position,None)[0]
+            goal=min((n for n in self.patrol_nodes if n in distances and distances[n]>1e-3),key=key,default=goal)
+        if goal is None:
+            goal=min(self.patrol_nodes,key=lambda n:(math.dist(position,self.positions[n]),n))
+        return goal

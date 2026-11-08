@@ -4,7 +4,15 @@ function progress(message){self.postMessage({type:'progress',message});}
 async function initialize(){
   const start=performance.now();progress('Loading Python…');
   python=await loadPyodide({indexURL:new URL('runtime/',import.meta.url).href});
-  progress('Loading scientific packages…');await python.loadPackage(['numpy','pandas','scipy']);
+  // loadPackage logs a failed download and carries on; confirm the packages and retry once.
+  const required=['numpy','pandas','scipy'];
+  for(let attempt=1;;attempt++){
+    progress(attempt===1?'Loading scientific packages…':'Retrying scientific package download…');
+    await python.loadPackage(required,{messageCallback:()=>{},errorCallback:()=>{}});
+    const missing=required.filter(name=>!(name in python.loadedPackages));
+    if(!missing.length)break;
+    if(attempt===2)throw Error(`Could not download ${missing.join(', ')} for the simulation engine. Check your internet connection and reload the page.`);
+  }
   const manifest=await (await fetch(new URL('manifest.json',import.meta.url),{cache:'no-cache'})).json();
   const response=await fetch(new URL('python-source.zip',import.meta.url),{cache:'no-cache'});
   if(!response.ok)throw Error('The simulation source bundle could not be loaded.');

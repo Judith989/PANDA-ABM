@@ -62,7 +62,11 @@ def build(raw,name,osm_path=None):
    if b and free.covers(LineString([nodes[a],nodes[b]])):
     ism=mapped_union.covers(LineString([nodes[a],nodes[b]]))
     edges.append(dict(**{'from':a,'to':b},kind='sidewalk' if ism else 'shared_lot',source='osm_mapped_path' if ism else ('generated_synthetic_shared_space' if not osm_path else 'estimated_internal_shared_space_requires_review')))
- ids=list(nodes);tree=cKDTree([nodes[k] for k in ids]);access={};dest={};adjustments=[]
+ # Link bays and doors only to the main walkable surface; isolated grid cells
+ # (e.g. triangles between angled bays) must not capture a bay's egress.
+ grid=nx.Graph();grid.add_nodes_from(nodes);grid.add_edges_from((e['from'],e['to']) for e in edges)
+ main=max(nx.connected_components(grid),key=len)
+ ids=[k for k in nodes if k in main];tree=cKDTree([nodes[k] for k in ids]);access={};dest={};adjustments=[]
  for s in raw['slots']:
   p=[s['local_x_m'],s['local_y_m']];ds,ix=tree.query(p,k=min(100,len(ids)));candidates=[]
   for d,i in zip(np.atleast_1d(ds),np.atleast_1d(ix)):

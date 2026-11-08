@@ -41,7 +41,7 @@ The new local dashboard supports an exact number of initially empty spaces, incl
 
 Every driver's timestamped position and state history is retained, including unsuccessful drivers. Selecting a driver displays its traveled route. The optional traffic mode adds following gaps, junction yielding, parking-maneuver obstruction, queue episodes and aisle delay. Inspection shows speed, vehicles ahead and behind, stopping cause and observations from the last decision scan. Downloads include trajectories, observations, intervention times and traffic records.
 
-Traffic mode is an experimental kinematic model on the inferred aisle network. It uses two directional lanes, a 4.5-m vehicle length and a 2-m following gap. It is not calibrated against traffic observations, does not model building occlusion, and does not establish collision-dynamics accuracy. The archived paper results use the original independent-movement mode, which remains the default.
+Traffic mode is an experimental kinematic model on the inferred aisle network. It uses two directional lanes, a 5.45-m vehicle length (the largest configured vehicle) and a 2-m following gap. It is not calibrated against traffic observations, does not model building occlusion, and does not establish collision-dynamics accuracy. The archived paper results use the original independent-movement mode, which remains the default.
 
 ~~~powershell
 python -m pytest tests/test_supply_traffic.py

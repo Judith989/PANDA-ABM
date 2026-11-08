@@ -44,6 +44,8 @@ def safe_to_cross(agent,points):
     lookahead=model.search_speed_m_per_s*(duration+2)+model.traffic.vehicle_length_m
     for car in road_agents(model):
         if car.state not in DRIVING:continue
+        # A car already stopped for this walker cannot also hold the walker back.
+        if getattr(car,'traffic_blocker',None)=='pedestrian_'+str(getattr(agent,'driver_id','')):continue
         previous=(car.x_m,car.y_m);left=lookahead
         # Use exactly the same envelope as yielding; inconsistent stop/cross
         # distances create permanent mutual waits.
@@ -71,6 +73,7 @@ def safe_step(agent,target,dt):
     end=tuple(a+(b-a)*ratio for a,b in zip(current,target))
     for car in road_agents(model):
         if car.state not in DRIVING:continue
+        if getattr(car,'traffic_blocker',None)=='pedestrian_'+str(getattr(agent,'driver_id','')):continue
         pos=(car.x_m,car.y_m);budget=model.traffic.budgets.get(car.driver_id,0.)
         from panda_abm.core.traffic import heading
         direction=getattr(car,'vehicle_heading',heading(car))

@@ -81,13 +81,14 @@ def test_through_traffic_counts_recording_and_live_agreement(env):
         assert rows[track['id']][1:5]==track['samples'][-1][1:5]
 
 def test_osm_building_glb_and_context_manifest():
-    p=ROOT/'dashboard/assets/downtown_buildings.glb';data=p.read_bytes();magic,version,length=struct.unpack('<III',data[:12])
+    from panda_abm.twin.environments import asset_path,downtown_environment
+    p=asset_path('downtown_buildings.glb');data=p.read_bytes();magic,version,length=struct.unpack('<III',data[:12])
     assert magic==0x46546c67 and version==2 and length==len(data)
     n,kind=struct.unpack('<II',data[12:20]);doc=json.loads(data[20:20+n]);assert doc['meshes'] and doc['accessors'][0]['count']>0
-    draft=json.loads((ROOT/'research/downtown_review/20261105/environment.review.json').read_text(encoding='utf8'))
-    assert draft['config']['meta']['review_required'] and draft['config']['buildings']
-    assert draft['alignment']['up_axis']=='Z'
-    assert draft['config']['aisle_network']['directed'] and len(draft['config']['aisle_network']['controls'])==5
+    draft=json.loads((ROOT/'data/lot_config.downtown_laramie.review.json').read_text(encoding='utf8'))
+    assert draft['meta']['review_required'] and draft['buildings']
+    assert downtown_environment()['alignment']['up_axis']=='Z'
+    assert draft['aisle_network']['directed'] and len(draft['aisle_network']['controls'])==5
 
 
 def test_turn_restriction_routes_around_forbidden_movement(env):

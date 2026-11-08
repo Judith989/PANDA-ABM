@@ -155,7 +155,10 @@ def validate_environment(payload):
     model_files=payload.get('model_files',[])
     if not isinstance(model_files,list) or len(model_files)>8: raise ValueError('At most eight GLB models are supported')
     for f in model_files:
+        if not isinstance(f,dict) or set(f)-{'name','sha256','label'}: raise ValueError('Model entries need name, sha256 and an optional label')
         identifier(f.get('name'),'Model filename')
+        # Optional user-chosen display name; the filename still identifies the file.
+        if 'label' in f and (not isinstance(f['label'],str) or not f['label'].strip() or len(f['label'])>80): raise ValueError('Model names must be 1–80 characters')
         if not f['name'].lower().endswith('.glb') or '/' in f['name'] or '\\' in f['name']: raise ValueError('Use GLB filenames without folder paths')
         digest=f.get('sha256','')
         if len(digest)!=64 or any(ch not in '0123456789abcdef' for ch in digest): raise ValueError('Model SHA-256 is required')
@@ -254,9 +257,24 @@ def satellite_environment():
     return validate_environment(dict(id='walmart_satellite',config=raw))
 
 
+def corrected_environment():
+    """Default planning layout: Walmart double rows corrected from satellite imagery.
+
+    The original 1,315-record configuration behind the published results is untouched.
+    """
+    raw=json.loads((ROOT/'data/lot_config.corrected_imagery.json').read_text(encoding='utf8'))
+    return validate_environment(dict(id='walmart_corrected',config=raw))
+
+
+def asset_path(name):
+    """Generated dashboard asset, else the committed release copy (fresh clones)."""
+    local=ROOT/'dashboard/assets'/name
+    return local if local.exists() else ROOT/'web/release/assets'/name
+
+
 def downtown_environment():
     """Regular downtown platform environment; the earlier review snapshot is retained."""
     raw=json.loads((ROOT/'data/lot_config.downtown_laramie.json').read_text(encoding='utf8'))
     return validate_environment(dict(id='downtown_laramie',config=raw,
         alignment=dict(east_m=0,north_m=0,height_m=0,rotation_radians=0,scale=1,up_axis='Z',forward_axis='X',context_note='OSM building footprints with illustrative heights; visualization only.'),
-        model_files=[dict(name='downtown_buildings.glb',sha256=hashlib.sha256((ROOT/'dashboard/assets/downtown_buildings.glb').read_bytes()).hexdigest())]))
+        model_files=[dict(name='downtown_buildings.glb',sha256=hashlib.sha256(asset_path('downtown_buildings.glb').read_bytes()).hexdigest())]))

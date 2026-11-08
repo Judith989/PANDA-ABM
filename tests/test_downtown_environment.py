@@ -56,6 +56,7 @@ def test_invalid_generalized_config(draft,change):
 
 def test_original_inventory_unchanged():
     original=ROOT/'research/walmart_pedestrians_20261105/before_lot_config.json'
+    if not original.exists():pytest.skip('Local research archive not present')
     assert hashlib.sha256(original.read_bytes()).hexdigest()=='6cd8d14592ed7590dfe0c00ddd96424d2dc2ab7a9525e36bed968a6d3ef250a4'
     current=json.loads((ROOT/'data/lot_config.json').read_text())
     assert len(current['slots'])==1315 and current['pedestrian_network']

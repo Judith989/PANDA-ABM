@@ -64,13 +64,16 @@ def build(destination=None):
     template=example_environment()
     from panda_abm.twin.environments import downtown_environment
     downtown=downtown_environment()
-    write_json(web/'environments.json',dict(synthetic=synthetic,satellite=satellite,walmart=walmart,template=template,downtown=downtown))
+    from panda_abm.twin.environments import corrected_environment
+    corrected=corrected_environment();corrected.update(alignment=satellite['alignment'],model_files=satellite['model_files']);corrected=validate_environment(corrected)
+    write_json(web/'environments.json',dict(synthetic=synthetic,satellite=satellite,walmart=walmart,template=template,downtown=downtown,corrected=corrected))
     files={p.relative_to(ROOT).as_posix():p for p in (ROOT/'panda_abm').rglob('*.py')}
     files['data/lot_config.json']=ROOT/'data/lot_config.json'
     if (ROOT/'data/lot_config.synthetic.json').exists():files['data/lot_config.synthetic.json']=ROOT/'data/lot_config.synthetic.json'
     files['data/lot_config.satellite_estimated.json']=ROOT/'data/lot_config.satellite_estimated.json'
     files['data/lot_config.downtown_laramie.review.json']=ROOT/'data/lot_config.downtown_laramie.review.json'
     files['data/lot_config.downtown_laramie.json']=ROOT/'data/lot_config.downtown_laramie.json'
+    files['data/lot_config.corrected_imagery.json']=ROOT/'data/lot_config.corrected_imagery.json'
     dependencies={}
     for name in ('mesa','tqdm','networkx'):
         dist=distribution(name);base=Path(dist.locate_file(name));dependencies[name]=dist.version

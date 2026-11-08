@@ -9,7 +9,7 @@ def main():
  from shapely.strtree import STRtree
  from panda_abm.environment.pedestrian_geometry import bay_polygon
  out=ROOT/'research/vehicle_clearance_20261105';out.mkdir(exist_ok=True)
- for filename in ('lot_config.json','lot_config.satellite_estimated.json','lot_config.downtown_laramie.json','lot_config.synthetic.json'):
+ for filename in (sys.argv[1:] or ('lot_config.json','lot_config.satellite_estimated.json','lot_config.downtown_laramie.json','lot_config.synthetic.json')):
   path=ROOT/'data'/filename;raw=json.loads(path.read_text(encoding='utf8'));net=raw['aisle_network'];nodes=net['nodes']
   backup=out/('before_'+filename)
   if not backup.exists():backup.write_bytes(path.read_bytes())

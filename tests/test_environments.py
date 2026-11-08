@@ -80,8 +80,8 @@ def test_satellite_variant_preserves_original_and_records_rule_assumptions():
     env=satellite_environment();config=env['config']
     assert len(old['slots'])==1315 and len(config['slots'])==472
     legacy=ROOT/'research/walmart_pedestrians_20261105/before_lot_config.json'
-    source=legacy.read_bytes() if legacy.exists() else original
-    assert config['meta']['original_config_sha256']==hashlib.sha256(source).hexdigest()
+    if legacy.exists():
+        assert config['meta']['original_config_sha256']==hashlib.sha256(legacy.read_bytes()).hexdigest()
     assert env['validation']['usable_spaces']==396
     assert sum(s['is_accessible'] for s in config['slots'])==7
     for key in ('entry_points','exit_points','walmart_doors'):

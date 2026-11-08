@@ -4,7 +4,7 @@ from panda_abm.twin.replay import LiveSimulation, record_run, validate_settings
 from panda_abm.twin.platform import simulate, compare
 
 
-@pytest.mark.parametrize('duration',[True,0,59,21601,60.5,'600'])
+@pytest.mark.parametrize('duration',[True,0,9,21601,60.5,'600'])
 def test_reject_invalid_duration(duration):
     with pytest.raises(ValueError):validate_settings(dict(simulation_duration_s=duration))
 

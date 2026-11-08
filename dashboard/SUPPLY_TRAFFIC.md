@@ -11,7 +11,7 @@ Current built-in environments use explicit walking graphs. New walking intervals
 5. Start live execution. Set the map action back to **Inspect driver / space**. Inspect a space, then close it, reopen it, or release its background vehicle. Actions apply at the current engine time, which may be ahead of the displayed replay time. The view jumps to that time and the action is recorded.
 6. Alternatively, inspect a space and add a timestamped action to the schedule before starting. The same schedule applies to every arm of a matched comparison.
 7. Inspect a vehicle to show its traveled route, speed, same-lane neighbors, bumper gap, traffic delay and slowing cause. The last decision scan records visible spaces and feasible candidates. Space-level information can supply remote candidates; these are distinct from local visibility.
-8. The traffic panel lists congestion episodes and their causes. Aisle lines show cumulative traffic delay when the overlay is enabled. Download the run before closing the tab.
+8. The traffic panel lists congestion episodes and their causes. Road lines show jams: red where a jam is happening now, orange where one happened earlier, yellow where traffic delay reached 30 vehicle-seconds when the overlay is enabled. Download the run before closing the tab.
 
 ## Occupancy and closures
 
@@ -21,7 +21,7 @@ In exact-count mode, the requested number is selected from nonclosed usable spac
 
 ## Traffic mechanics and limits
 
-The optional model uses the existing inferred aisle graph and driver decision mechanisms. It limits distance traveled at each physical tick according to a 4.5-m vehicle length and a 2-m minimum following gap. Opposing directions use separate logical lanes. A 1.2-m right-hand display offset makes these directions visible; longitudinal positions and route distances remain on the graph centerline.
+The optional model uses the existing inferred aisle graph and driver decision mechanisms. It limits distance traveled at each physical tick according to a 5.45-m vehicle length (the largest configured vehicle) and a 2-m minimum following gap. Opposing directions use separate logical lanes. A 1.2-m right-hand display offset makes these directions visible; longitudinal positions and route distances remain on the graph centerline.
 
 Following and downstream capacity are evaluated before crossing priority. Nearby crossing conflicts share one priority order, so closely spaced junctions cannot issue circular yield instructions. The selected vehicle keeps priority while clearing the conflict group; waiting age and stable identifiers resolve new requests. A blocked vehicle cannot reserve a junction it cannot enter. Small road bends and opposing lanes are not treated as crossing traffic. Movement stops at changes in route direction for reassessment. The final parking maneuver can temporarily obstruct the adjacent aisle. An approach delayed by traffic must actually finish before maneuvering and claiming. Drivers whose search deadline expires travel toward their exit before becoming terminal abandoned drivers.
 
@@ -32,6 +32,27 @@ A queue contains vehicles moving below 0.5 m/s because of a modeled traffic cons
 The model has no calibrated acceleration, turning radii, vehicle-specific dimensions, occlusion, pedestrian conflicts or observed junction priorities. It does not prove collision-free vehicle-body motion. Episode thresholds and following parameters are explicit modeling assumptions. Closed parking spaces do not close the driving aisle. Blocking or reconfiguring road access would require a separate topology intervention.
 
 Parking choice retains the original free-flow approach-time estimates. Realized traffic delay contributes to elapsed search, but drivers do not predict future queues when scoring a target. Following reacts to the vehicle ahead; displaying a vehicle behind does not imply a strategic response to it.
+
+## How jams clear
+
+Every jam clears. The model lets a held vehicle through, records it in the run's `deadlock_releases`, and lists it in the jam report:
+
+| Situation | When it is released | Logged reason |
+|---|---|---|
+| Vehicles blocking each other in a loop | after 10 s | `circular_wait` |
+| A parked car's, building's or vehicle's footprint that never clears on the estimated geometry | after 30 s | `occupied_bay`, `building_clearance`, `vehicle_clearance` |
+| The front of a queue held for 90 s by anything other than a red signal | after 90 s; the queue behind follows | `stall_limit` (with what was holding it) |
+| A car waiting 90 s to enter or cross a junction while other traffic keeps taking the space | after 90 s | `stall_limit` |
+
+A released vehicle may overlap footprints, yields and queue holds for 15 s. Red signals are always obeyed.
+
+Each jam records:
+- its location, start, end and duration;
+- the largest number of vehicles queued;
+- its root cause: what held the front of the queue, such as a red signal, a junction yield, pedestrians crossing, a parking maneuver, or a queue spilling back from the next segment;
+- any releases on that aisle during the jam.
+
+On the map, road lines are red where a jam is happening now, orange where one happened earlier, and yellow where vehicles lost at least 30 vehicle-seconds to traffic without a jam.
 
 ## Reproducibility
 

@@ -1,7 +1,7 @@
 /* Display adapter only: all decisions, claims and movement come from Python. */
 const $ = id => document.getElementById(id);
 const C = window.Cesium;
-const state = {scene:null, run:null, id:null, time:0, playing:false, selected:null, live:null, slotEntities:new Map(), drivers:new Map(), parkedCars:new Map(), pedestrians:new Map(), context:[], networks:[]};
+const state = {scene:null, run:null, id:null, time:0, playing:false, selected:null, live:null, slotEntities:new Map(), drivers:new Map(), parkedCars:new Map(), backgroundCars:new Map(), pedestrians:new Map(), context:[], networks:[]};
 const draft={occupied:new Set(),closed:new Set(),schedule:[]};
 let trajectoryEntity;
 const infoText = {unaided:'Drivers find spaces by observing nearby bays as they drive.',aisle:'Drivers know how many usable free spaces are in each aisle, then search within it.',space:'Drivers know which individual spaces are free and can head toward one. Spaces are not reserved.'};
@@ -11,7 +11,7 @@ let followController;
 let currentEnvironment;
 const modelNames = {cpt:'CPT',rum:'M1',deterministic:'M0'};
 const esc = value => String(value??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const reasonLabel = value => ({following_vehicle:'Following a vehicle',junction_yield:'Yielding at a junction',downstream_queue:'Waiting for room beyond a junction',parking_maneuver:'Parking maneuver ahead',red_signal:'Red signal',stop_control:'Stop sign',pedestrian_crossing:'Pedestrians crossing',occupied_bay:'Occupied parking bay clearance',vehicle_clearance:'Vehicle footprint clearance',building_clearance:'Building clearance'}[value]??value??'—');
+const reasonLabel = value => ({following_vehicle:'Following a vehicle',junction_yield:'Yielding at a junction',downstream_queue:'Waiting for room beyond a junction',parking_maneuver:'Parking maneuver ahead',red_signal:'Red signal',stop_control:'Stop sign',pedestrian_crossing:'Pedestrians crossing',occupied_bay:'Occupied parking bay clearance',vehicle_clearance:'Vehicle footprint clearance',deadlock_release:'Passing a mutual blockage',spillback_from_next_segment:'Queue spilling back from the next segment',stall_limit:'Released after 90 s stopped',building_clearance:'Building clearance'}[value]??value??'—');
 const formatTime = seconds => `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(Math.floor(seconds%60)).padStart(2,'0')}`;
 async function api(url, options) {return window.PandaPlatform.api(url,options);}
 function slotAngle(slot){return ((slot.heading_reference==='clockwise_from_north'?90-(slot.heading_deg??0):(slot.heading_deg??0))*Math.PI/180);}
@@ -25,7 +25,22 @@ function lastAt(samples,t) {
   while(low<high){const mid=Math.ceil((low+high)/2);if(samples[mid][0]<=t)low=mid;else high=mid-1;}
   return low;
 }
+const STREET_LIMITS={street_1h:60,street_2h:120,street_3h:180,street_4h:240};
+function updatePolicyOptions(){
+  // Street-limit policies only change spaces classified as on-street parking.
+  const street=(state.scene?.config.slots??[]).filter(s=>s.parking_kind==='on_street'&&!s.is_unavailable&&!s.is_blocked);
+  const limits=new Set(street.map(s=>s.time_limit_minutes??null));
+  for(const option of $('parking-policy').options){
+    const minutes=STREET_LIMITS[option.value];if(minutes==null)continue;
+    const same=street.length&&limits.size===1&&limits.has(minutes);
+    option.disabled=!street.length;
+    option.textContent=`${minutes/60} hour${minutes>60?'s':''} on street spaces${!street.length?' · no street spaces in this layout':same?' · same as configured here':''}`;
+  }
+  if($('parking-policy').selectedOptions[0]?.disabled)$('parking-policy').value='configured';
+}
 function sample(track,t) {
+  // Through vehicles waiting outside the network have no samples until admitted.
+  if(!track.samples.length)return {x:0,y:0,direction:[0,0],state:'not_arrived',space:null,search:0};
   const i=lastAt(track.samples,t),a=track.samples[i],b=track.samples[i+1];
   const p=window.PandaMotion.interpolate(a,b,t,state.run?.aisle_edges??[]);
   return {...p,state:a[3],space:a[4],search:a[5]};
@@ -64,7 +79,8 @@ function createScene() {
     animation:false,timeline:false,geocoder:false,homeButton:false,sceneModePicker:true,navigationHelpButton:true,
     fullscreenButton:true,selectionIndicator:true,infoBox:false,shouldAnimate:false});
   followController=window.PandaFollowCamera.create(C,viewer,text=>{$('camera-follow-status').textContent=text;});
-  const basemap=viewer.imageryLayers.addImageryProvider(new C.OpenStreetMapImageryProvider({url:'https://tile.openstreetmap.org/'}));
+  viewer.camera.percentageChanged=.05;viewer.camera.changed.addEventListener(updateNearbyCarModels);
+  const basemap=viewer.imageryLayers.addImageryProvider(new C.OpenStreetMapImageryProvider({url:'https://tile.openstreetmap.org/',maximumLevel:19}));
   basemap.show=!state.scene.config.meta.synthetic||state.scene.config.meta.show_basemap===true;
   viewer.scene.globe.baseColor=C.Color.fromCssColorString('#e3e8dc');
   viewer.scene.backgroundColor=C.Color.fromCssColorString('#edf1e9');
@@ -93,7 +109,7 @@ function createScene() {
     const hits=viewer.scene.drillPick(click.position,12),editing=$('map-action').value!=='inspect';
     const hit=hits.find(h=>editing?h.id?.id?.startsWith('slot:'):['driver:','pedestrian:','parked:'].some(prefix=>h.id?.id?.startsWith(prefix)))??hits.find(h=>h.id?.id?.startsWith('slot:'))??hits[0];
     if(hit?.id?.id?.startsWith('module:')&&!editing){focusParkingModule(hit.id.id.slice(7));return;}
-    if(hit&&hit.id){state.selected=hit.id.id;const [kind,id]=state.selected.split(':');if(['driver','parked','pedestrian'].includes(kind))$('driver-select').value=id;handleMapSelection();inspect();if(state.run&&!state.editingOccupancy)updateTraffic();}
+    if(hit&&hit.id){state.selected=hit.id.id.replace(/:car(:model)?$/,'');const [kind,id]=state.selected.split(':');if(['driver','parked','pedestrian'].includes(kind))$('driver-select').value=id;handleMapSelection();inspect();if(state.run&&!state.editingOccupancy)updateTraffic();}
   },C.ScreenSpaceEventType.LEFT_CLICK);
   home();
 }
@@ -123,10 +139,10 @@ async function reloadEnvironmentContext(item){
 async function applyEnvironment(item){
   setPlaying(false);await closeLive();
   if(viewer&&!viewer.isDestroyed())viewer.destroy();
-  currentEnvironment=item;state.scene=item.scene;state.run=null;state.selected=null;state.time=0;
-  state.context=[];state.networks=[];state.segmentHighlights=[];state.roadEdges=[];state.slotEntities.clear();state.drivers.clear();state.parkedCars.clear();state.pedestrians.clear();trajectoryEntity=null;appliedTime=-1;
+  currentEnvironment=item;state.scene=item.scene;state.run=null;state.selected=null;state.time=0;$('congestion-legend').hidden=true;
+  state.context=[];state.networks=[];state.segmentHighlights=[];state.roadEdges=[];state.slotEntities.clear();state.backgroundCars.clear();bayFits.clear();state.drivers.clear();state.parkedCars.clear();state.pedestrians.clear();trajectoryEntity=null;appliedTime=-1;
   state.previewPanels=null;state.editingOccupancy=false;draft.occupied.clear();draft.closed.clear();draft.schedule=[];
-  createScene();window.PandaPlatform.attachViewer(viewer);
+  createScene();window.PandaPlatform.attachViewer(viewer);updatePolicyOptions();
   document.querySelector('.site').textContent=item.name;$('environment-map-label').textContent=state.scene.config.meta.alignment_status==='provisional_satellite_simulation_variant'?'Satellite estimate · provisional':state.scene.config.meta.synthetic?'Synthetic layout · illustrative':'Configured lot geometry';document.querySelector('.map-caption b').textContent=state.scene.config.slots.length.toLocaleString()+' spaces';
   const usable=state.scene.config.slots.filter(s=>!s.is_unavailable&&!s.is_blocked).length;
   const pedestrian=state.scene.config.pedestrian_network;$('traffic-enabled').disabled=!!pedestrian;if(pedestrian)$('traffic-enabled').checked=true;$('pedestrian-routing-note').textContent=pedestrian?`Walking network active. ${pedestrian.summary?.spaces_with_egress??'?'} bays have an egress connector; destination reachability varies. Disconnected spaces are excluded. Connections and entrances include estimates.`:'This imported environment has no walking network and uses straight-line walking.';
@@ -148,7 +164,7 @@ function showNetwork(edges) {
     for(const offset of lanes&&!spur?[-1.2,1.2]:[0]){
       const shift=[(b[1]-a[1])/length*offset,-(b[0]-a[0])/length*offset];
       const entity=viewer.entities.add({polyline:{positions:[local(a[0]+shift[0],a[1]+shift[1],.14),local(b[0]+shift[0],b[1]+shift[1],.14)],width:spur?0.65:1.5,material:C.Color.fromCssColorString(spur?'#cbd4b7':'#71b8c4').withAlpha(spur?0.35:0.8)},show:$('show-network').checked});
-      entity._aisleId=key;state.networks.push(entity);
+      entity._aisleId=key;entity._segment=[a,b];entity._spur=spur;state.networks.push(entity);
     }
   }
 }
@@ -196,6 +212,76 @@ function endOccupancyDraft(){
   $('map-action').value='inspect';appliedTime=-1;
   if(state.run){$('run-title').textContent=state.run.live?'Live parking simulation':'Saved replay';$('view-mode').textContent=state.run.live?'LIVE SIMULATION · CESIUMJS 3D':'SAVED REPLAY · CESIUMJS 3D';$('run-description').textContent='Current recording. Start a new simulation to apply the configured initial occupancy.';}
 }
+// Model footprints (width, length in metres) measured from the bundled GLBs.
+const VEHICLE_SIZE={compact:[1.85,3.93],sedan:[1.95,4.58],suv:[2.07,4.79],van:[2.13,5.19],truck:[2.15,5.48]};
+// Uniform scale so a parked model keeps clear of neighbouring and opposite bays:
+// at least 0.3 m between side-by-side cars and 0.6 m between opposite cars.
+// Where a layout's opposite bays overlap (the original Walmart estimate puts
+// head-to-head bay centres ~3.1 m apart for 4.9-m bays), each car is given its
+// own half of the shared strip and shifted outward; display only.
+const bayFits=new Map();
+function bayFit(slot){
+  let fit=bayFits.get(slot);if(fit)return fit;
+  const length=slot.length_m??4.9,angle=slotAngle(slot),u=[Math.cos(angle),Math.sin(angle)];let gap=Infinity,side=0;
+  for(const other of state.scene.config.slots){
+    if(other===slot||other.is_unavailable)continue;
+    const dx=other.local_x_m-slot.local_x_m,dy=other.local_y_m-slot.local_y_m,along=dx*u[0]+dy*u[1];
+    if(Math.abs(-dx*u[1]+dy*u[0])<1&&Math.abs(along)<gap){gap=Math.abs(along);side=Math.sign(along);}
+  }
+  const overlap=Math.max(0,length-gap),shift=-side*overlap/4;
+  fit={length:length-overlap/2,x:slot.local_x_m+u[0]*shift,y:slot.local_y_m+u[1]*shift};bayFits.set(slot,fit);return fit;
+}
+function parkedScale(kind,slot){
+  const [w,l]=VEHICLE_SIZE[kind]??VEHICLE_SIZE.sedan;
+  return Math.min(1,((slot.width_m??2.06)-.3)/w,(bayFit(slot).length-.6)/l);
+}
+// A parked car in every occupied bay that no simulated driver is shown in
+// (initial occupancy, background vehicles and the manual selection draft).
+// Near the camera it is the real vehicle model; beyond 600 m a car-sized box
+// (batched by Cesium) keeps a full lot cheap to draw.
+const BACKGROUND_KINDS=['sedan','suv','compact','sedan','van','suv','truck','sedan'];
+const BACKGROUND_COLORS=['#d8dcdf','#2e3236','#878d93','#7c2228','#26487c','#ebe8e0','#4b5a3b','#a3a7ab','#5a3d2b'];
+// Real models are created only for cars near the camera and released when the
+// camera moves away; every parked car also has a cheap batched box for the far view.
+const MODEL_RANGE_M=200,MODEL_RELEASE_M=300,FAR=new C.DistanceDisplayCondition(MODEL_RANGE_M,Number.MAX_VALUE);
+function showBackgroundCars(occupied,driverSlots=new Set()){
+  for(const [id,item] of state.slotEntities){
+    const visible=occupied.has(id)&&!driverSlots.has(id)&&!item.slot.is_unavailable&&!item.slot.is_blocked;
+    let car=state.backgroundCars.get(id);
+    if(!visible){if(car)car.show=false;continue;}
+    if(!car){
+      let hash=0;for(const c of id)hash=(hash*31+c.charCodeAt(0))>>>0;
+      // Background vehicles use types that fit the bay with little shrinking.
+      const slot=item.slot,fitting=BACKGROUND_KINDS.filter(k=>parkedScale(k,slot)>=.8),kinds=fitting.length?fitting:['compact'];
+      const kind=kinds[hash%kinds.length],scale=parkedScale(kind,slot),[w,l]=VEHICLE_SIZE[kind],fit=bayFit(slot);
+      const color=C.Color.fromCssColorString(BACKGROUND_COLORS[(hash>>>4)%BACKGROUND_COLORS.length]),centre=local(fit.x,fit.y,.06+.7*scale);
+      car=viewer.entities.add({id:'slot:'+id+':car',name:id,position:centre,orientation:C.Transforms.headingPitchRollQuaternion(centre,new C.HeadingPitchRoll(-slotAngle(slot),0,0)),
+        box:{dimensions:new C.Cartesian3(w*scale,l*scale,1.4*scale),material:color,distanceDisplayCondition:FAR}});
+      car.vehicle={kind,scale,color,x:fit.x,y:fit.y,angle:slotAngle(slot),anchor:local(fit.x,fit.y,0)};
+      state.backgroundCars.set(id,car);
+    }
+    car.show=true;
+  }
+  updateNearbyCarModels();
+}
+function updateNearbyCarModels(){
+  if(!viewer||viewer.isDestroyed())return;
+  const eye=viewer.camera.positionWC;
+  for(const [id,car] of state.backgroundCars){
+    const distance=C.Cartesian3.distance(eye,car.vehicle.anchor),child=car.modelEntity;
+    if(car.show&&distance<MODEL_RANGE_M&&!child){
+      const v=car.vehicle,position=local(v.x,v.y,.06);
+      car.modelEntity=viewer.entities.add({id:'slot:'+id+':car:model',name:id,parent:car,position,orientation:C.Transforms.headingPitchRollQuaternion(position,new C.HeadingPitchRoll(-v.angle,0,0)),
+        model:{uri:`assets/vehicles/${v.kind}.glb`,scale:v.scale,runAnimations:false,distanceDisplayCondition:new C.DistanceDisplayCondition(0,MODEL_RANGE_M),
+          color:v.color,colorBlendMode:C.ColorBlendMode.MIX,colorBlendAmount:.55}});
+    }else if(child&&(!car.show||distance>MODEL_RELEASE_M)){viewer.entities.remove(child);car.modelEntity=null;}
+  }
+}
+// Cars in lot = cars already parked at the start (or background) + arriving drivers parked now.
+function showLotCount(total,initial,capacity){
+  $('occupied').textContent=total.toLocaleString();
+  $('occupied-detail').textContent=`${(100*total/capacity).toFixed(1)}% of ${capacity.toLocaleString()} spaces · ${initial.toLocaleString()} already there + ${(total-initial).toLocaleString()} arrivals`;
+}
 function renderOccupancyDraft(){
   syncPauseButton();
   for(const [id,item] of state.slotEntities){
@@ -203,10 +289,11 @@ function renderOccupancyDraft(){
     item.entity.polygon.material=item.closed?C.Color.fromCssColorString('#a92259').withAlpha(.9):slotColor(item.slot,item.occupied);
   }
   for(const e of [...state.drivers.values(),...state.parkedCars.values(),...state.pedestrians.values()])e.show=false;
+  showBackgroundCars(draft.occupied);$('congestion-legend').hidden=true;
   for(const e of state.networks){e.polyline.width=1;e.polyline.material=C.Color.fromCssColorString('#a6bda1').withAlpha(.6);}
   if(trajectoryEntity){viewer.entities.remove(trajectoryEntity);trajectoryEntity=null;}
   const capacity=state.scene.config.slots.filter(s=>!s.is_unavailable&&!s.is_blocked).length;
-  $('occupied').textContent=(100*draft.occupied.size/capacity).toFixed(2)+'%';
+  showLotCount(draft.occupied.size,draft.occupied.size,capacity);
   for(const id of ['parked','searching','abandoned'])$(id).textContent='0';
   $('view-mode').textContent='INITIAL OCCUPANCY · MAP SELECTION';
   $('run-title').textContent='Choose initially occupied spaces';
@@ -261,13 +348,59 @@ function updateTraffic(){
     const points=track.samples.filter(p=>p[0]<=state.time&&p[3]!=='not_arrived').flatMap(p=>(p[6]?.length?p[6]:[[p[1],p[2]]]).map(q=>local(q[0],q[1],1.8)));
     if(points.length>1)trajectoryEntity=viewer.entities.add({polyline:{positions:points,width:4,material:C.Color.YELLOW}});
   }
-  if(!traffic?.enabled){$('traffic-status').textContent='Traffic interactions are disabled in this simulation.';$('congestion-episodes').textContent='';return;}
+  if(!traffic?.enabled){$('congestion-legend').hidden=true;$('traffic-status').textContent='Traffic interactions are disabled in this simulation.';$('congestion-episodes').textContent='';return;}
   const queue=Object.values(traffic.queues).reduce((a,b)=>a+b,0);
   const ranked=Object.entries(traffic.aisle_delay_s).sort((a,b)=>b[1]-a[1]);
   $('traffic-status').textContent=`${queue} vehicles currently queued · ${traffic.cumulative_delay_s.toFixed(1)} vehicle-seconds of traffic delay · ${(traffic.jam_episodes??[]).length} sustained multi-vehicle jams · ${traffic.episodes.length} delay episodes including single vehicles`;
   const through=frame?.through_traffic;if(through&&through.level!=='off')$('traffic-status').textContent+=` · through traffic: ${through.active} moving, ${through.waiting_entry} waiting outside, ${through.completed} completed`;
-  $('congestion-episodes').innerHTML='<p><b>Aisles with most delay</b></p>'+ranked.slice(0,5).map(([id,delay])=>`<div>${segmentLink(id)} · ${delay.toFixed(1)} vehicle-seconds · peak queue ${traffic.aisle_peak_queue[id]??0}</div>`).join('')+'<p><b>Recent sustained jams (2+ queued vehicles for 5+ s)</b></p>'+(traffic.jam_episodes??[]).slice(-12).map(e=>`<div>${segmentLink(e.aisle)} · ${e.start_s.toFixed(0)}–${e.end_s==null?'ongoing':e.end_s.toFixed(0)} s · ${e.duration_s.toFixed(0)} s · peak queue ${e.peak_queue} · ${e.peak_queue>=2?'multi-vehicle queue':'single-vehicle delay'} · ${Object.entries(e.cause_active_seconds??{}).map(([k,v])=>esc(reasonLabel(k))+': '+v.toFixed(1)+' s active').join(', ')||Object.keys(e.causes).map(k=>esc(reasonLabel(k))).join(', ')}</div>`).join('');
-  for(const e of state.networks){const a=e._aisleId,delay=traffic.aisle_delay_s[a]??0;e.polyline.width=$('show-congestion').checked&&delay>0?4:1;e.polyline.material=C.Color.fromCssColorString($('show-congestion').checked&&delay>0?(delay>(ranked[0]?.[1]??1)*.65?'#d43b24':delay>(ranked[0]?.[1]??1)*.25?'#f8961e':'#f9c74f'):'#a6bda1').withAlpha(.8);}
+  $('congestion-episodes').innerHTML=jamReport(traffic)+'<p><b>Aisles with most delay</b></p>'+ranked.slice(0,5).map(([id,delay])=>`<div>${segmentLink(id)} · ${delay.toFixed(1)} vehicle-seconds · peak queue ${traffic.aisle_peak_queue[id]??0}</div>`).join('');
+  colourRoads(traffic,frame);
+}
+// Road colours use the model's jam definition: at least two traffic-constrained
+// vehicles below 0.5 m/s in the same aisle for at least 5 s.
+const SLOWED_VEHICLE_S=30,ROAD_STYLE={jam:['#a02cff',5],earlier:['#cfa8f0',3.5],slowed:['#f2d24c',3],none:['#cfd6d1',1]};
+function pointToSegment(p,a,b){const dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy,f=l?Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/l)):0;return Math.hypot(p[0]-a[0]-f*dx,p[1]-a[1]-f*dy);}
+// Jam report: where, when, how long, how many vehicles and the root cause (what held
+// the front of the queue). Releases are stuck vehicles let through by the model.
+function jamReport(traffic){
+  const jams=traffic.jam_episodes??[],releases=traffic.deadlock_releases??[];
+  if(!jams.length)return '<p><b>Jams</b></p><p class="help">No jams so far: no aisle has held two or more queued vehicles for 5 seconds.</p>';
+  const roots=e=>Object.entries(e.root_cause_seconds??{}).sort((a,b)=>b[1]-a[1]);
+  const cause=e=>{const r=roots(e),total=r.reduce((n,[,v])=>n+v,0);return r.length?r.map(([k,v])=>`${esc(reasonLabel(k))}${r.length>1?' '+Math.round(100*v/total)+'%':''}`).slice(0,2).join(', '):esc(Object.keys(e.causes??{}).map(reasonLabel).join(', '))};
+  const byCause={};for(const e of jams){const top=roots(e)[0]?.[0]??'unknown';byCause[top]=(byCause[top]??0)+e.duration_s;}
+  const durations=jams.map(e=>e.duration_s),ongoing=jams.filter(e=>e.end_s==null).length;
+  const freed=e=>releases.filter(r=>r.aisle===e.aisle&&r.time_s>=e.start_s&&r.time_s<=(e.end_s??Infinity)).length;
+  return `<p><b>Jams: ${jams.length}</b> (${ongoing} ongoing) · longest ${Math.max(...durations).toFixed(0)} s · average ${(durations.reduce((a,b)=>a+b,0)/jams.length).toFixed(0)} s</p>`
+    +`<p class="help">Jam time by root cause: ${Object.entries(byCause).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${esc(reasonLabel(k))} ${v.toFixed(0)} s`).join(' · ')}</p>`
+    +[...jams].reverse().slice(0,15).map(e=>{const n=freed(e);return `<div class="jam-row">${segmentLink(e.aisle)} · ${formatTime(e.start_s)}–${e.end_s==null?'<b>ongoing</b>':formatTime(e.end_s)} · lasted ${e.duration_s.toFixed(0)} s · up to ${e.peak_queue} vehicles · cause: ${cause(e)}${n?` · ${n} stuck vehicle${n>1?'s':''} let through`:''}</div>`;}).join('');
+}
+function colourRoads(traffic,frame){
+  const t=state.time,jams=traffic.jam_episodes??[],on=$('show-congestion').checked;
+  const now=new Set(jams.filter(e=>e.start_s<=t&&(e.end_s==null||e.end_s>=t)).map(e=>e.aisle));
+  const earlier=new Set(jams.filter(e=>e.end_s!=null&&e.end_s<t).map(e=>e.aisle));
+  // Locate current jams by the queued vehicles themselves, not the whole aisle group.
+  const queued=[];
+  for(const [id,view] of Object.entries(frame?.drivers??{})){
+    if(!view.reason||view.speed_m_s>=.5||!now.has(view.aisle))continue;
+    const track=state.run.tracks.find(x=>x.id===id);if(!track?.samples.length)continue;
+    const p=sample(track,t);queued.push({aisle:view.aisle,point:[p.x,p.y]});
+  }
+  const located=new Set(queued.map(q=>q.aisle));
+  let shown=false;
+  for(const e of state.networks){
+    const id=e._aisleId;let level='none';
+    if(on&&!e._spur){
+      const near=queued.some(q=>q.aisle===id&&pointToSegment(q.point,...e._segment)<6);
+      if(near||(now.has(id)&&!located.has(id)&&id!=='cross_aisle'))level='jam';
+      else if(id!=='cross_aisle'&&earlier.has(id))level='earlier';
+      else if(id!=='cross_aisle'&&(traffic.aisle_delay_s[id]??0)>=SLOWED_VEHICLE_S)level='slowed';
+    }
+    shown||=level!=='none';
+    const [colour,width]=ROAD_STYLE[level];
+    e.polyline.width=e._spur?0.65:width;
+    e.polyline.material=C.Color.fromCssColorString(e._spur?'#cbd4b7':colour).withAlpha(e._spur?.35:.85);
+  }
+  $('congestion-legend').hidden=!shown;
 }
 function downloadCongestion(){
   const traffic=telemetryAt(state.time)?.traffic??state.run?.traffic;
@@ -293,12 +426,12 @@ function createVehicleEntities(tracks,population){
   for(const track of tracks){
     const type=types.get(track.id)??'sedan',kind=['compact','sedan','suv','van','truck'].includes(type)?type:'sedan';
     track.vehicle_type=kind;
-    if(!track.walking_intervals)track.walking_intervals=window.PandaPedestrians.legacyIntervals(track,state.scene.config.slots,state.scene.config.walmart_doors??[]);
+    if(!track.walking_intervals)track.walking_intervals=window.PandaPedestrians.legacyIntervals(track,state.scene.config.slots,state.scene.config.walmart_doors??[],1.4,state.scene.config.pedestrian_network);
     const graphics=()=>({uri:`assets/vehicles/${kind}.glb`,scale:1,runAnimations:false});
     state.drivers.set(track.id,viewer.entities.add({id:'driver:'+track.id,name:track.id,position:local(0,0,.06),
       model:graphics(),point:{pixelSize:9,color:C.Color.fromCssColorString('#a77b27'),outlineColor:C.Color.WHITE,outlineWidth:1.5,disableDepthTestDistance:Infinity}}));
     state.parkedCars.set(track.id,viewer.entities.add({id:'parked:'+track.id,name:track.id,show:false,position:local(0,0,.06),model:graphics()}));
-    state.pedestrians.set(track.id,viewer.entities.add({id:'pedestrian:'+track.id,name:'Walking driver '+track.id,show:false,position:local(0,0,.03),model:{uri:'assets/pedestrian.glb',scale:1,runAnimations:false},point:{pixelSize:5,color:C.Color.ORANGE,outlineColor:C.Color.WHITE,outlineWidth:1,disableDepthTestDistance:Infinity}}));
+    state.pedestrians.set(track.id,viewer.entities.add({id:'pedestrian:'+track.id,name:'Walking driver '+track.id,show:false,position:local(0,0,.03),model:{uri:'assets/pedestrian.glb',scale:1,runAnimations:false,color:C.Color.fromCssColorString('#16b5d0'),colorBlendMode:C.ColorBlendMode.MIX,colorBlendAmount:.6},point:{pixelSize:5,color:C.Color.fromCssColorString('#16b5d0'),outlineColor:C.Color.WHITE,outlineWidth:1,disableDepthTestDistance:Infinity}}));
   }
 }
 async function loadRun(id) {
@@ -344,7 +477,7 @@ function bringMapIntoView(){if($('follow-driver').checked)document.querySelector
 function render() {
   if(state.editingOccupancy){renderOccupancyDraft();return;}
   if(!state.run)return;
-  const t=state.time,run=state.run,telemetry=telemetryAt(t);
+  const t=state.time,run=state.run,telemetry=telemetryAt(t),driverSlots=new Set();
   for(const track of run.tracks) {
     const p=sample(track,t),e=state.drivers.get(track.id);
     const parkedStage=['parked','walking_to_destination','at_destination','returning_to_vehicle'].includes(p.state);
@@ -368,7 +501,7 @@ function render() {
       person.model.nodeTransformations=Object.fromEntries([['LeftLeg',swing],['RightLeg',-swing],['LeftArm',-swing*.8],['RightArm',swing*.8]].map(([name,angle])=>[name,new C.TranslationRotationScale(undefined,C.Quaternion.fromAxisAngle(C.Cartesian3.UNIT_X,angle))]));
     }
     const parked=state.parkedCars.get(track.id),slot=state.slotEntities.get(p.space);
-    if(parked){parked.show=Boolean(slot&&parkedStage);if(parked.show){parked.position=local(slot.slot.local_x_m,slot.slot.local_y_m,.06);parked.orientation=C.Transforms.headingPitchRollQuaternion(local(slot.slot.local_x_m,slot.slot.local_y_m,.06),new C.HeadingPitchRoll(-slotAngle(slot.slot),0,0));}}
+    if(parked){parked.show=Boolean(slot&&parkedStage);if(parked.show)driverSlots.add(slot.slot.id);if(parked.show){const fit=bayFit(slot.slot);parked.position=local(fit.x,fit.y,.06);parked.model.scale=parkedScale(track.vehicle_type,slot.slot);parked.orientation=C.Transforms.headingPitchRollQuaternion(local(slot.slot.local_x_m,slot.slot.local_y_m,.06),new C.HeadingPitchRoll(-slotAngle(slot.slot),0,0));}}
   }
   updateCameraFollow();
   if(Math.floor(t)!==appliedTime) {
@@ -378,10 +511,11 @@ function render() {
     for(const event of run.interventions??[]){if(event.time_s>t)continue;for(const id of event.space_ids){if(event.action==='close')closed.add(id);if(event.action==='open')closed.delete(id);}}
     for(const [time,added,removed] of run.occupancy_changes){if(time>t)break;for(const id of added)occupied.add(id);for(const id of removed)occupied.delete(id);}
     for(const [id,item] of state.slotEntities){const taken=occupied.has(id);item.occupied=taken;item.closed=closed.has(id);item.entity.polygon.material=item.closed?C.Color.fromCssColorString('#a92259').withAlpha(.9):slotColor(item.slot,taken);}
+    showBackgroundCars(occupied,driverSlots);
     const row=run.system[lastAt(run.system,t)];
     $('parked').textContent=row[3];$('searching').textContent=row[2];$('abandoned').textContent=row[4];
     const cap=state.scene.config.slots.filter(s=>!s.is_unavailable&&!s.is_blocked).length;
-    $('occupied').textContent=(occupied.size/cap*100).toFixed(1)+'%';inspect();updateTraffic();
+    showLotCount(occupied.size,occupied.size-driverSlots.size,cap);inspect();updateTraffic();
   }
   $('timeline').value=t;$('time').textContent=formatTime(t);
   const cursor=$('chart-cursor');if(cursor){const x=45+t/run.duration_s*600;cursor.setAttribute('x1',x);cursor.setAttribute('x2',x);}
@@ -415,7 +549,9 @@ async function togglePlayback(){
     }finally{state.pausing=false;syncPauseButton();}
   }else{if(state.run&&state.time>=state.run.duration_s&&(!state.live||state.live.complete))state.time=0;setPlaying(!state.playing);}
 }
-function selectedDuration(){const value=$('simulation-duration').value;return value==='full'?null:value==='custom'?Number($('custom-duration-min').value)*60:Number(value);}
+function selectedDuration(){const value=$('simulation-duration').value;return value==='full'?null:value==='custom'?Math.round(Number($('custom-duration-value').value)*Number($('custom-duration-unit').value)):Number(value);}
+// Custom durations: 10 s to 6 h in either unit.
+function updateDurationLimits(){const unit=Number($('custom-duration-unit').value),input=$('custom-duration-value');input.min=unit===1?10:(10/60).toFixed(2);input.max=21600/unit;}
 function showSummary(summary,windowed=false){
   const n=v=>v==null?'—':v.toFixed(1),denominator=windowed?summary.arrivals:summary.drivers;
   $('outcomes').innerHTML=`Parked <b>${summary.parked} / ${denominator}</b><br>${windowed?'Mean observed search':'Mean search'} <b>${n(summary.mean_search_s)} s</b><br>Mean walk <b>${n(summary.mean_walk_m)} m</b><br>Mean intended-exit distance <b>${n(summary.mean_exit_m)} m</b>`;
@@ -508,7 +644,7 @@ async function init() {
   if(!C)throw Error('Cesium could not load. Internet access to cesium.com is needed for this preview.');
   state.scene=await api('/api/scene');
   await window.PandaEnvironments.init(state.scene,{apply:applyEnvironment,current:()=>currentEnvironment,context:reloadEnvironmentContext,validate:payload=>window.PandaPlatform.environmentRequest(payload)});
-  currentEnvironment=window.PandaEnvironments.walmart();createScene();window.PandaPlatform.attachViewer(viewer);loadContext().catch(error=>{$('map-status').textContent=error.message;});
+  currentEnvironment=window.PandaEnvironments.walmart();createScene();window.PandaPlatform.attachViewer(viewer);updatePolicyOptions();loadContext().catch(error=>{$('map-status').textContent=error.message;});
   $('scenario').addEventListener('submit',submit);
   $('supply-mode').addEventListener('change',()=>{if($('supply-mode').value==='pick')beginOccupancyDraft();else{endOccupancyDraft();updateSupplyControls();render();}});
   $('map-action').addEventListener('change',()=>{if($('map-action').value==='occupied'&&!state.editingOccupancy)beginOccupancyDraft();});
@@ -529,7 +665,8 @@ async function init() {
   $('congestion-episodes').addEventListener('click',event=>{const button=event.target.closest('[data-traffic-segment]');if(button)focusTrafficSegment(button.dataset.trafficSegment);});
   $('play').addEventListener('click',togglePlayback);
   $('pause-live').addEventListener('click',togglePlayback);
-  $('simulation-duration').addEventListener('change',()=>{const custom=$('simulation-duration').value==='custom';$('custom-duration-container').hidden=!custom;$('custom-duration-min').disabled=!custom;});
+  $('simulation-duration').addEventListener('change',()=>{const custom=$('simulation-duration').value==='custom';$('custom-duration-container').hidden=!custom;$('custom-duration-value').disabled=!custom;});
+  $('custom-duration-unit').addEventListener('change',()=>{const input=$('custom-duration-value'),seconds=Number(input.value)*(Number($('custom-duration-unit').value)===1?60:1/60);updateDurationLimits();input.value=Number(seconds.toFixed(2));});updateDurationLimits();
   $('timeline').addEventListener('input',()=>{state.time=Number($('timeline').value);render();});
   $('reset-camera').addEventListener('click',()=>home());
   $('overhead-camera').addEventListener('click',()=>home(true));
@@ -541,5 +678,7 @@ async function init() {
   $('show-network').addEventListener('change',()=>state.networks.forEach(e=>{e.show=$('show-network').checked;}));
   $('download').addEventListener('click',async()=>{if(!state.run)return;const url=URL.createObjectURL(new Blob([JSON.stringify(state.run)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`panda-${state.id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
   await loadRun('baseline');requestAnimationFrame(tick);
+  // Default planning layout; the saved reference run (original layout) stays under Saved runs.
+  if(window.PandaEnvironments.get('walmart_corrected'))await window.PandaEnvironments.activate('walmart_corrected');
 }
 init().catch(error=>{$('map-status').textContent=error.message;$('job-status').textContent=error.message;console.error(error);});

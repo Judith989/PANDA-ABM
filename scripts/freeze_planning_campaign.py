@@ -20,7 +20,8 @@ def main():
         files.extend((ROOT/folder).rglob('*.py'))
     files.extend((ROOT/'data').glob('*.json'))
     files.extend(ROOT.glob('*requirements*.txt'))
-    files.append(ROOT/'dashboard/assets/downtown_buildings.glb')
+    glb=ROOT/'dashboard/assets/downtown_buildings.glb'
+    files.append(glb if glb.exists() else ROOT/'web/release/assets/downtown_buildings.glb')
     manifest={}
     for source in sorted(set(files)):
         relative=source.relative_to(ROOT);target=frozen/relative

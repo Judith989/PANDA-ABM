@@ -37,10 +37,17 @@ class AisleTraffic:
     minimum_gap_m = 2.
     junction_clearance_m = 5.
     congestion_min_duration_s = 5.
+    deadlock_after_s = 10.
+    footprint_wait_limit_s = 30.
+    stall_limit_s = 90.
+    deadlock_pass_s = 15.
+    FOOTPRINT_REASONS = ('vehicle_clearance', 'occupied_bay', 'building_clearance')
+    QUEUE_REASONS = ('following_vehicle', 'downstream_queue')
 
     def __init__(self, model):
         self.model = model
         self.budgets = {}
+        self.deadlock_releases = []
         self.episodes = []
         self.open_episodes = {}
         self.jam_episodes = []
@@ -85,7 +92,9 @@ class AisleTraffic:
             for point in a.route:
                 dx, dy = point[0]-previous[0], point[1]-previous[1]
                 length = math.hypot(dx, dy)
-                if length > 1e-7 and (dx*a.traffic_heading[0]+dy*a.traffic_heading[1])/length < .999:
+                # Match heading(): sub-millimetre steps (e.g. rounded entry
+                # coordinates) carry no direction and must not stop the vehicle.
+                if length > 1e-3 and (dx*a.traffic_heading[0]+dy*a.traffic_heading[1])/length < .999:
                     break
                 straight += length
                 previous = point
@@ -250,6 +259,79 @@ class AisleTraffic:
 
         from panda_abm.core.pedestrian_movement import yield_to_pedestrians
         yield_to_pedestrians(self,active,poses)
+        self.resolve_deadlocks(active,desired)
+
+    def resolve_deadlocks(self, active, desired):
+        """Break waits that cannot end, e.g. two cars whose footprints block each other.
+
+        Kinematic clearance rules can form cycles no real driver would hold, and
+        provisional bay geometry can leave a footprint conflict that never clears.
+        After ``deadlock_after_s`` (cycles) or ``footprint_wait_limit_s`` (footprint
+        conflicts) the vehicle may ignore footprint clearance for ``deadlock_pass_s``.
+        Queue order and signals still apply. Every release is recorded.
+        """
+        now = self.model.clock_s
+        dt = self.model.integration_seconds
+        previous = getattr(self, 'stalled_s', {})
+        self.stalled_s = {a.driver_id: previous.get(a.driver_id, 0.)+dt
+                          if self.budgets[a.driver_id] <= 1e-6 and desired[a.driver_id] > 1e-6 else 0.
+                          for a in active}
+        passes = getattr(self, 'deadlock_passes', {})
+        self.deadlock_passes = {k: v for k, v in passes.items() if v[0] > now and k in self.stalled_s}
+        waiting = {a.driver_id: a.traffic_blocker for a in active
+                   if self.stalled_s[a.driver_id] >= self.deadlock_after_s}
+        for start in sorted(waiting):
+            chain, node = [], start
+            while node in waiting and node not in chain:
+                chain.append(node)
+                node = waiting[node]
+            if node in chain:
+                cycle = chain[chain.index(node):]
+                chosen = min(cycle, key=lambda k: (-self.stalled_s[k], k))
+                if chosen not in self.deadlock_passes:
+                    self.deadlock_passes[chosen] = (now+self.deadlock_pass_s, frozenset(cycle)-{chosen})
+                    agent = next(a for a in active if a.driver_id == chosen)
+                    self.deadlock_releases.append(dict(time_s=now, released=chosen, reason='circular_wait', cycle=sorted(cycle),
+                                                       aisle=self.aisle_at((agent.x_m, agent.y_m))))
+        for a in active:
+            # Footprint conflicts on provisional geometry (a parked car, building or
+            # vehicle that never clears) would otherwise hold a vehicle indefinitely.
+            if (self.stalled_s[a.driver_id] >= self.footprint_wait_limit_s and a.driver_id not in self.deadlock_passes
+                    and a.traffic_reason in self.FOOTPRINT_REASONS):
+                self.deadlock_passes[a.driver_id] = (now+self.deadlock_pass_s, frozenset({a.traffic_blocker}))
+                self.deadlock_releases.append(dict(time_s=now, released=a.driver_id, reason=a.traffic_reason, obstacle=a.traffic_blocker,
+                                                   aisle=self.aisle_at((a.x_m, a.y_m))))
+        by_id = {a.driver_id: a for a in active}
+        # Stall limit: every jam must clear. Follow a long-stopped queue to its front;
+        # if the front vehicle has been held stall_limit_s by anything but a red
+        # signal (e.g. yielding into a gridlocked junction), let it through.
+        for a in active:
+            if self.stalled_s[a.driver_id] < self.stall_limit_s:
+                continue
+            front, seen = a, set()
+            while (front.traffic_reason in self.QUEUE_REASONS and front.traffic_blocker in by_id
+                   and front.driver_id not in seen):
+                seen.add(front.driver_id)
+                front = by_id[front.traffic_blocker]
+            if (front.traffic_reason == 'red_signal' or front.driver_id in self.deadlock_passes
+                    or self.stalled_s[front.driver_id] < self.stall_limit_s):
+                # Junction starvation: the queue ahead creeps, but traffic from other
+                # approaches keeps taking the space; give the long-waiting car priority.
+                if a.traffic_reason not in ('junction_yield', 'downstream_queue') or a.driver_id in self.deadlock_passes:
+                    continue
+                front, seen = a, set()
+            self.deadlock_passes[front.driver_id] = (now+self.deadlock_pass_s, frozenset({'*'}))
+            self.deadlock_releases.append(dict(time_s=now, released=front.driver_id, reason='stall_limit',
+                                               held_by=front.traffic_reason, queue_length=len(seen)+1,
+                                               aisle=self.aisle_at((front.x_m, front.y_m))))
+        for driver, (_, partners) in self.deadlock_passes.items():
+            a = by_id[driver]
+            # Footprint clearance is waived for the pass; signals are not. A stall-limit
+            # pass ('*') also overrides yielding and queue holds.
+            waived = '*' in partners and a.traffic_reason not in (None, 'red_signal')
+            if (waived or a.traffic_blocker in partners or a.traffic_reason in self.FOOTPRINT_REASONS) and self.budgets[driver] < desired[driver]:
+                self.budgets[driver] = desired[driver]
+                a.traffic_reason, a.traffic_blocker = 'deadlock_release', None
 
     def distance_budget(self, agent, dt):
         return min(self.model.search_speed_m_per_s*dt,
@@ -259,6 +341,7 @@ class AisleTraffic:
         dt = self.model.integration_seconds
         queues = Counter()
         causes = {}
+        roots = {}
         queued_delay = Counter()
         for a in road_agents(self.model):
             active = a.state in DRIVING
@@ -274,29 +357,35 @@ class AisleTraffic:
                     queues[aisle] += 1
                     queued_delay[aisle] += delay
                     causes.setdefault(aisle, Counter())[reason] += 1
+                    # Root cause: what holds the front of the queue, not the followers.
+                    if reason not in self.QUEUE_REASONS:
+                        roots.setdefault(aisle, Counter())[reason] += 1
         now = self.model.clock_s+dt
         for aisle,count in queues.items():
             self.aisle_peak_queue[aisle]=max(self.aisle_peak_queue[aisle],count)
-        self._update_episode_group(self.episodes,self.open_episodes,queues,causes,queued_delay,now,dt,1)
-        self._update_episode_group(self.jam_episodes,self.open_jam_episodes,queues,causes,queued_delay,now,dt,2)
+        self._update_episode_group(self.episodes,self.open_episodes,queues,causes,queued_delay,now,dt,1,roots)
+        self._update_episode_group(self.jam_episodes,self.open_jam_episodes,queues,causes,queued_delay,now,dt,2,roots)
         self.queues=dict(queues)
 
-    def _update_episode_group(self,completed,opened,queues,causes,queued_delay,now,dt,minimum):
+    def _update_episode_group(self,completed,opened,queues,causes,queued_delay,now,dt,minimum,roots=None):
         qualifying={aisle:count for aisle,count in queues.items() if count>=minimum}
         for aisle,count in qualifying.items():
             if aisle not in opened:
                 opened[aisle]=dict(aisle=aisle,start_s=now-dt,peak_queue=0,causes=Counter(),
-                    cause_vehicle_seconds=Counter(),cause_active_seconds=Counter(),queued_vehicle_delay_s=0.,minimum_queued_vehicles=minimum)
+                    cause_vehicle_seconds=Counter(),cause_active_seconds=Counter(),root_cause_seconds=Counter(),queued_vehicle_delay_s=0.,minimum_queued_vehicles=minimum)
             episode=opened[aisle]
             episode['peak_queue']=max(episode['peak_queue'],count)
             episode['causes'].update(causes[aisle])
             episode['cause_vehicle_seconds'].update({k:v*dt for k,v in causes[aisle].items()})
             episode['cause_active_seconds'].update({k:dt for k in causes[aisle]})
+            # Seconds during which each root cause held the front of the queue; a queue
+            # whose front is outside the aisle is recorded as spill-back.
+            episode['root_cause_seconds'].update({k:dt for k in (roots or {}).get(aisle,{})} or {'spillback_from_next_segment':dt})
             episode['queued_vehicle_delay_s']+=queued_delay[aisle]
         for aisle in set(opened)-set(qualifying):
             episode=opened.pop(aisle);episode['end_s']=now-dt
             episode['duration_s']=episode['end_s']-episode['start_s']
-            for field in ('causes','cause_vehicle_seconds','cause_active_seconds'):episode[field]=dict(episode[field])
+            for field in ('causes','cause_vehicle_seconds','cause_active_seconds','root_cause_seconds'):episode[field]=dict(episode[field])
             episode['multi_vehicle_queue']=episode['peak_queue']>=2
             if episode['duration_s']>=self.congestion_min_duration_s:completed.append(episode)
 
@@ -304,7 +393,7 @@ class AisleTraffic:
         now=self.model.clock_s
         def records(completed,opened):
             ongoing=[dict(e,end_s=None,duration_s=max(0.,now-e['start_s']),causes=dict(e['causes']),
-                cause_vehicle_seconds=dict(e['cause_vehicle_seconds']),cause_active_seconds=dict(e['cause_active_seconds']),
+                cause_vehicle_seconds=dict(e['cause_vehicle_seconds']),cause_active_seconds=dict(e['cause_active_seconds']),root_cause_seconds=dict(e['root_cause_seconds']),
                 multi_vehicle_queue=e['peak_queue']>=2) for e in opened.values() if now-e['start_s']>=self.congestion_min_duration_s]
             return sorted(completed+ongoing,key=lambda e:(e['start_s'],e['aisle'],e['end_s'] if e['end_s'] is not None else float('inf')))
         return dict(enabled=True,model='kinematic_aisle_v1',
@@ -314,7 +403,8 @@ class AisleTraffic:
             jam_definition='At least two traffic-constrained vehicles below 0.5 m/s in an aisle continuously for at least 5 s',
             queues=getattr(self,'queues',{}),cumulative_delay_s=self.cumulative_delay_s,aisle_delay_s=dict(self.aisle_delay_s),
             aisle_peak_queue=dict(self.aisle_peak_queue),episodes=records(self.episodes,self.open_episodes),
-            jam_episodes=records(self.jam_episodes,self.open_jam_episodes))
+            jam_episodes=records(self.jam_episodes,self.open_jam_episodes),
+            deadlock_releases=list(self.deadlock_releases))
 
     def driver_view(self, agent):
         moving = agent.state in DRIVING

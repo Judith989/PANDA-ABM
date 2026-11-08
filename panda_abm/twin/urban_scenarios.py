@@ -6,11 +6,16 @@ from panda_abm.behavior.references import lot_distance_references
 
 VISIT_RANGES={'short':(15,60),'near_limit':(90,120),'long':(150,240)}
 
+# Uniform time limits applied to classified on-street spaces only.
+STREET_LIMIT_MINUTES={'street_1h':60,'street_2h':120,'street_3h':180,'street_4h':240}
+PARKING_POLICIES=('configured','unrestricted',*STREET_LIMIT_MINUTES)
+
 def apply_policy(facility,policy):
     if policy=='configured':return facility
-    if policy=='street_2h' and not any(s.parking_kind=='on_street' for s in facility.spaces):
+    if policy in STREET_LIMIT_MINUTES and not any(s.parking_kind=='on_street' for s in facility.spaces):
         raise ValueError('Street-limit comparison requires classified on-street spaces')
-    spaces=tuple(replace(s,time_limit_minutes=None if policy=='unrestricted' else 120 if s.parking_kind=='on_street' else s.time_limit_minutes) for s in facility.spaces)
+    limit=STREET_LIMIT_MINUTES.get(policy)
+    spaces=tuple(replace(s,time_limit_minutes=None if policy=='unrestricted' else limit if s.parking_kind=='on_street' else s.time_limit_minutes) for s in facility.spaces)
     return replace(facility,spaces=spaces)
 
 def apply_visit_profile(population,facility,profile,seed):

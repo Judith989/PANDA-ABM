@@ -27,9 +27,15 @@ class DriverAgent(Agent):
 
     def log(self,event,**kwargs):self.model.event_logger.log(event,self.model.clock_s,agent=self,**kwargs)
 
+    bay_retry_s=60.
+
     @property
     def routing_heading(self):
-        return getattr(self,'vehicle_heading',None) if self.model.traffic else None
+        if not self.model.traffic:return None
+        # A car partly inside a bay spur (e.g. after losing the space) reverses
+        # out; its heading must not force it deeper into the bay.
+        if self.model.navigation.on_bay_spur((self.x_m,self.y_m)):return None
+        return getattr(self,'vehicle_heading',None)
 
     def step(self):
         now=self.model.clock_s
@@ -76,6 +82,14 @@ class DriverAgent(Agent):
             if not self.route and not getattr(self,'bay_entry_started',False):
                 from panda_abm.core.bay_clearance import begin_maneuver
                 if not begin_maneuver(self):
+                    # Traffic mode only: the bay is free and unreserved but its entry is
+                    # obstructed. Reselecting it every tick from the same spot is a
+                    # livelock that blocks the road, so skip it for bay_retry_s.
+                    sid=self.chosen_space_id
+                    if (self.model.traffic and self.model.resource_manager.is_available(sid)
+                            and getattr(self.model,'bay_maneuvers',{}).get(sid) in (None,self.driver_id)):
+                        if not hasattr(self,'blocked_bays'):self.blocked_bays={}
+                        self.blocked_bays[sid]=now+self.bay_retry_s
                     target=self.model.facility.space_by_id[self.chosen_space_id]
                     self.log('SpaceClaimAttempted',space=target)
                     self.log('SpaceClaimFailed',space=target,details={'reason':'occupied_closed_or_maneuver_in_progress','position':'aisle_side_before_bay_entry'})
@@ -151,6 +165,8 @@ class DriverAgent(Agent):
                 reported_available=sum(o.perceived_available for o in observations),
                 oldest_observation_s=min((o.observed_at_s for o in observations),default=self.model.clock_s)))
         feasible=self.model.build_choice_set(self,observations)
+        blocked=getattr(self,'blocked_bays',None)
+        if blocked:feasible=[s for s in feasible if blocked.get(s.space_id,-1.)<=self.model.clock_s]
         self.last_candidate_space_ids=[s.space_id for s in feasible]
         self.candidate_evaluations+=len(feasible)
         self.log('CandidateObserved',details={'observed_count':len(observations),'feasible_count':len(feasible),
@@ -159,6 +175,8 @@ class DriverAgent(Agent):
         if feasible:
             distances=self.model.navigation.distances((self.x_m,self.y_m),
                 [self.model.navigation.space_nodes[s.space_id] for s in feasible],heading=self.routing_heading)
+            # A space with no admissible route cannot be approached now.
+            feasible=[s for s in feasible if self.model.navigation.space_nodes[s.space_id] in distances]
             forecast={o.space.space_id:o.forecast_available_probability for o in observations}
             for s in feasible:
                 travel=distances[self.model.navigation.space_nodes[s.space_id]]/self.model.search_speed_m_per_s
@@ -228,6 +246,7 @@ class DriverAgent(Agent):
                     self.x_m,self.y_m=x,y
                     self.path.append((x,y))
                     if count_search:self.search_distance_m+=distance
+                    budget=max(0.,budget-distance)
                 self.route.pop(0);continue
             if budget<=1e-9:break
             move=min(distance,budget)

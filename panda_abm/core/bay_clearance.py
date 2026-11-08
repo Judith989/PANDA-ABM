@@ -112,6 +112,8 @@ def limit_motion(agent,direction,distance,origin=None,static_only=False):
     if not getattr(model,'traffic',None):return distance
     geometry=(model.facility.aisle_network or {}).get('bay_geometry',{})
     blockers=[];point=origin if origin is not None else (agent.x_m,agent.y_m);own=getattr(agent,'departure_space_id',None)
+    # After a recorded deadlock release the vehicle may briefly overlap footprints.
+    if not static_only and agent.driver_id in getattr(model.traffic,'deadlock_passes',{}):return distance
     # Occupied bays include background cars, which are not driving agents.
     cells=getattr(model,'_clearance_bay_cells',None)
     if cells is None:
@@ -130,6 +132,8 @@ def limit_motion(agent,direction,distance,origin=None,static_only=False):
         if g.get('heading_reference')=='clockwise_from_north':angle=math.pi/2-angle
         owner=model._clearance_agents.get(state.occupant_id)
         l,w=dimensions(owner) if owner else (5.45,2.02)
+        # A parked car sits within its configured bay; it does not overhang into the aisle.
+        l,w=min(l,g.get('length_m',l)),min(w,g.get('width_m',w))
         blockers.append((rectangle((s.x_m,s.y_m),(math.cos(angle),math.sin(angle)),l+.1,w+.1),'occupied_bay',sid))
     for other in ([] if static_only else road_agents(model)):
         if other is agent or other.state not in (DriverState.SEARCHING,DriverState.TARGETING,DriverState.EXITING):continue

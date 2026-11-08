@@ -4,7 +4,30 @@
   const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const number=(v,d=2)=>v==null?'—':Number(v).toFixed(d);
   const jobs=new Map(), replays=new Map();let engine, comparison, measurement, busy=false, runtimeLoad, renderedFrames=0, study;
-  const metricNames={search_s:'Search (s)',success_pct:'Parking success (%)',walk_m:'Walk (m)',exit_m:'Exit proximity (m)',failed_claims:'Failed claims / driver',joint_search_walk_s:'Combined time (s)'};
+  const metricNames={search_s:'Search (s)',success_pct:'Parking success (%)',walk_m:'Walk (m)',exit_m:'Exit proximity (m)',failed_claims:'Failed claims / driver',joint_search_walk_s:'Combined time (s)',
+    entry_wait_s:'Wait to enter (s)',arrival_to_search_end_s:'Arrival to search end (s)',traffic_delay_vehicle_s:'Traffic delay (vehicle-s)',jam_episodes:'Sustained jams'};
+  // Planning dimensions: each scenario overrides one setting of the shared base scenario.
+  const dimensions={
+    parking_policy:{label:'Parking time-limit policy',values:[['configured','Configured limits'],['unrestricted','No time limits'],['street_1h','1 hour on street'],['street_2h','2 hours on street'],['street_3h','3 hours on street'],['street_4h','4 hours on street']]},
+    through_traffic:{label:'Through traffic (requires traffic interactions)',values:[['off','No through traffic'],['low','Low · 30 vehicles/hour'],['medium','Medium · 120 vehicles/hour'],['high','High · 240 vehicles/hour']],extra:{traffic_enabled:true}},
+    arrival_interval_s:{label:'Parking demand (arrival gap)',values:[[60,'1 arrival every 60 s'],[30,'1 arrival every 30 s'],[20,'1 arrival every 20 s'],[10,'1 arrival every 10 s'],[6,'1 arrival every 6 s']]},
+    occupancy:{label:'Initial occupancy (percentage supply mode)',values:[[.4,'40% occupied'],[.6,'60% occupied'],[.8,'80% occupied'],[.95,'95% occupied']]},
+    visit_profile:{label:'Activity duration',values:[['baseline','Baseline · 15–60 min'],['short','Short · 15–60 min'],['near_limit','Near limit · 90–120 min'],['long','Long · 150–240 min'],['mixed','Mixed durations']]},
+    background_departures:{label:'Initially parked vehicles',values:[['static','Stay parked'],['residual','Leave after assumed remaining stays']]},
+    traffic_enabled:{label:'Traffic interactions',values:[[false,'Independent movement'],[true,'Following, junctions and queues']]}
+  };
+  const conditionLabel=r=>r.scenario!=null?escape(r.scenario):`<span class="condition-tag condition-${r.information}"></span>${infos[r.information]}`;
+  const tone=(r,rows)=>r.scenario!=null?['unaided','aisle','space'][[...new Set(rows.map(x=>x.scenario))].indexOf(r.scenario)%3]:r.information;
+  function renderScenarioValues(){
+    const dimension=dimensions[el('scenario-dimension').value];
+    el('scenario-values').innerHTML=`<legend>Scenarios to compare</legend>`+dimension.values.map(([,label],i)=>`<label><input type="checkbox" name="scenario-value" value="${i}"${i<2?' checked':''}> ${escape(label)}</label>`).join('');
+  }
+  function updateCompareMode(){
+    const scenarios=el('compare-mode').value==='scenarios';
+    el('scenario-builder').hidden=!scenarios;
+    el('compare-help').textContent=scenarios?'Each selected model runs every scenario with the same seeds. Up to 240 simulations; traffic-enabled downtown runs take tens of seconds each on this device.':'Controls on the left set occupancy, drivers, arrivals and the first seed. Each replication advances the seed by one. All three information conditions are tested for each selected model.';
+    el('comparison-footnote').textContent=scenarios?'Changes are each scenario minus the reference scenario within each seed. Search and parking success include all arrivals. Walking and exit distances include parked drivers. Traffic measures appear when traffic interactions are on; they come from an uncalibrated kinematic model.':'Changes are informed minus unaided outcomes within each seed. Search and parking success include all arrivals. Walking and exit distances include parked drivers, whose composition can differ. Combined search-and-walking changes include only drivers parked in both conditions.';
+  }
   function download(value,name,type='application/json'){
     name=name.replace(/(\.[^.]+)$/,`-${Date.now()}$1`);
     const href=URL.createObjectURL(new Blob([typeof value==='string'?value:JSON.stringify(value,null,2)],{type}));
@@ -17,7 +40,7 @@
       else if(event.type==='progress'||event.type==='error')el('engine-status').textContent=event.message;
       else if(event.type==='comparison-progress'){
         el('comparison-progress').max=event.total;el('comparison-progress').value=event.done;
-        el('comparison-status').textContent=`Completed ${event.done} / ${event.total} simulations · ${names[event.model]} · ${infos[event.information]} · seed ${event.seed}`;
+        el('comparison-status').textContent=`Completed ${event.done} / ${event.total} simulations · ${names[event.model]} · ${infos[event.information]??event.information} · seed ${event.seed}`;
       }
     });
   }
@@ -32,12 +55,12 @@
     if(page==='simulate')window.dispatchEvent(new Event('resize'));
   }
   function table(rows,effect=false){
-    const keys=effect?['search_s','success_pct','walk_m','exit_m','failed_claims','joint_search_walk_s']:['search_s','success_pct','walk_m','exit_m','failed_claims'];
-    return `<div class="table-scroll"><table class="results-table"><thead><tr><th>Model / information</th>${keys.map(k=>`<th>${effect&&k==='success_pct'?'Success change (pp)':metricNames[k]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr><td><b>${names[r.model]}</b><br><span class="condition-tag condition-${r.information}"></span>${infos[r.information]}</td>${keys.map(k=>{const v=r.metrics[k];return `<td>${number(v.mean)}${v.low==null?'<small>No interval</small>':`<small>[${number(v.low)}, ${number(v.high)}]</small>`}${v.replications===0?'<small>No eligible observations</small>':''}</td>`;}).join('')}</tr>`).join('')}</tbody></table></div>`;
+    const keys=Object.keys(rows[0]?.metrics??{});
+    return `<div class="table-scroll"><table class="results-table"><thead><tr><th>Model / ${rows[0]?.scenario!=null?'scenario':'information'}</th>${keys.map(k=>`<th>${effect&&k==='success_pct'?'Success change (pp)':metricNames[k]??k}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr><td><b>${names[r.model]}</b><br>${conditionLabel(r)}</td>${keys.map(k=>{const v=r.metrics[k];return `<td>${number(v.mean)}${v.low==null?'<small>No interval</small>':`<small>[${number(v.low)}, ${number(v.high)}]</small>`}${v.replications===0?'<small>No eligible observations</small>':''}</td>`;}).join('')}</tr>`).join('')}</tbody></table></div>`;
   }
   function bars(rows,key,label){
     const max=Math.max(...rows.map(r=>Number(r.metrics[key].mean)||0),1);
-    return `<article class="panel"><h2>${label}</h2><div class="metric-bars">${rows.map(r=>`<div class="bar-row"><span>${names[r.model]} · ${infos[r.information].replace(' information','')}</span><div class="bar-track"><div class="bar-fill condition-${r.information}" style="width:${Math.max(0,(r.metrics[key].mean??0)/max*100)}%"></div></div><b>${number(r.metrics[key].mean,1)}</b></div>`).join('')}</div></article>`;
+    return `<article class="panel"><h2>${label}</h2><div class="metric-bars">${rows.map(r=>`<div class="bar-row"><span>${names[r.model]} · ${r.scenario!=null?escape(r.scenario):infos[r.information].replace(' information','')}</span><div class="bar-track"><div class="bar-fill condition-${tone(r,rows)}" style="width:${Math.max(0,(r.metrics[key].mean??0)/max*100)}%"></div></div><b>${number(r.metrics[key].mean,1)}</b></div>`).join('')}</div></article>`;
   }
   function trafficComparison(result){
     const jamEpisodes=r=>r.traffic.jam_episodes??[];
@@ -59,7 +82,18 @@
     hotspots.sort((a,b)=>b.count/b.n-a.count/a.n||b.delay-a.delay);
     return `<article class="panel"><h2>Traffic effects across simulations</h2><div class="table-scroll"><table class="results-table"><thead><tr><th>Model / information</th><th>Simulations</th><th>Mean traffic delay (vehicle-seconds)</th><th>Mean sustained jams</th></tr></thead><tbody>${totals.join('')}</tbody></table></div><h2>Recurring queue locations</h2><div class="table-scroll"><table class="results-table"><thead><tr><th>Model / information</th><th>Aisle</th><th>Simulations with congestion</th><th>Mean delay (vehicle-seconds)</th><th>Largest queue</th><th>Most frequent cause</th></tr></thead><tbody>${hotspots.slice(0,24).map(r=>`<tr><td>${names[r.model]} · ${infos[r.information]}</td><td>${escape(window.PandaSegmentInfo?.(r.aisle,result.settings.environment?.config??{},result.runs[0]?.segment_labels??{})?.label??r.aisle)}</td><td>${r.count} / ${r.n} · ${number(100*r.count/r.n,0)}%</td><td>${number(r.delay,1)}</td><td>${r.peak}</td><td>${escape(r.cause)}</td></tr>`).join('')}</tbody></table></div><p class="help">Up to 24 model, service and aisle combinations, ranked by the proportion of simulations with an episode with at least two queued vehicles lasting at least 5 seconds, then mean delay. Delay averages include simulations with zero delay. These are descriptive frequencies in the selected scenarios, not measured congestion probabilities. Full records are in the comparison download.</p></article>`;
   }
+  function displayScenarioComparison(result){
+    const traffic=result.metrics.includes('entry_wait_s');
+    const unmatched=Object.entries(result.matched_population).filter(([,v])=>!v).map(([k])=>k);
+    el('comparison-results').innerHTML=`<div class="comparison-outcomes">${bars(result.cells,'search_s','Mean search duration (s)')}${bars(result.cells,'success_pct','Parking success (%)')}${traffic?bars(result.cells,'entry_wait_s','Mean wait to enter (s)')+bars(result.cells,'traffic_delay_vehicle_s','Traffic delay (vehicle-seconds)'):''}</div>`
+      +`<article class="panel"><h2>Outcomes by scenario</h2>${table(result.cells)}</article>`
+      +`<article class="panel"><h2>Change from “${escape(result.method.reference)}”</h2>${table(result.effects,true)}<p class="help">Pointwise 95% percentile bootstrap intervals over whole matched replications; none from a single replication; no multiple-comparison adjustment.${unmatched.length?` <b>Different driver populations:</b> ${unmatched.map(escape).join(', ')} change demand, so their differences include the population change.`:' Every scenario used the same drivers and initial occupancy as the reference.'}</p></article>`;
+    if(result.settings.simulation_duration_s!=null)el('comparison-results').insertAdjacentHTML('afterbegin','<p class="help">Fixed observation window: success means parked by the cutoff among arrivals before it; unfinished searches are included at their elapsed time.</p>');
+    el('comparison-status').textContent=`${result.settings.environment?.name??'Walmart · Laramie'}: completed ${result.runs.length} simulations in ${number(result.wall_s,1)} s · ${result.scenarios.length} scenarios × ${result.models.length} model${result.models.length===1?'':'s'} × ${result.replications} replication${result.replications===1?'':'s'}.`;
+    el('comparison-json').disabled=false;el('comparison-csv').disabled=false;
+  }
   function displayComparison(result){
+    if(result.mode==='scenarios')return displayScenarioComparison(result);
     el('comparison-results').innerHTML=`<div class="comparison-outcomes">${bars(result.cells,'search_s','Mean search duration')}${bars(result.cells,'success_pct','Parking success')}</div><article class="panel"><h2>Outcomes by information condition</h2>${table(result.cells)}</article><article class="panel"><h2>Change from unaided search</h2>${table(result.effects,true)}<p class="help">Pointwise 95% percentile bootstrap intervals use 10,000 resamples of whole matched replications. No interval is calculated from a single replication. Intervals are not adjusted for multiple comparisons. Walking changes can reflect different parked populations; combined time uses drivers parked in both conditions.</p></article>`;
     if(result.settings.simulation_duration_s!=null)el('comparison-results').insertAdjacentHTML('afterbegin','<p class="help">Fixed observation window: success means parked by the cutoff among arrivals before it. Search is elapsed search observed by the cutoff, including unfinished searches and zero search before admission. These outcomes differ from full-trip search and eventual success.</p>');
     el('comparison-results').insertAdjacentHTML('beforeend',trafficComparison(result));
@@ -99,17 +133,25 @@
     const models=[...document.querySelectorAll('[name=compare-model]:checked')].map(x=>x.value);
     if(!models.length){el('comparison-status').textContent='Select at least one decision model.';return;}
     setBusy(true);comparison=null;el('comparison-results').innerHTML='';el('comparison-json').disabled=true;el('comparison-csv').disabled=true;el('comparison-progress').hidden=false;el('comparison-progress').value=0;
+    const payload={settings:window.settingsFromForm(),models,replications:Number(el('replications').value)};
+    if(el('compare-mode').value==='scenarios'){
+      const dimension=el('scenario-dimension').value,spec=dimensions[dimension];
+      const picked=[...document.querySelectorAll('[name=scenario-value]:checked')].map(x=>spec.values[Number(x.value)]);
+      if(picked.length<2){el('comparison-status').textContent='Select at least two scenarios.';return;}
+      payload.scenarios=picked.map(([value,label])=>({label,settings:{[dimension]:value,...(spec.extra??{})}}));
+    }
     try{
       await pauseLive();el('comparison-status').textContent='Preparing the Python engine…';
-      comparison=await getEngine().request('compare',{settings:window.settingsFromForm(),models,replications:Number(el('replications').value)});
+      comparison=await getEngine().request('compare',payload);
       comparison.source_manifest=runtimeLoad.manifest;displayComparison(comparison);
     }catch(error){el('comparison-status').textContent=error.message;}
     finally{setBusy(false);}
   }
   function comparisonCSV(){
-    const rows=[['type','model','information','metric','mean','ci_low','ci_high','replications']];
-    for(const [type,values] of [['outcome',comparison.cells],['informed_minus_unaided',comparison.effects]])for(const row of values)for(const [metric,value] of Object.entries(row.metrics))rows.push([type,row.model,row.information,metric,value.mean,value.low,value.high,value.replications]);
-    download(rows.map(r=>r.map(v=>v??'').join(',')).join('\n'),'panda-matched-comparison.csv','text/csv');
+    const scenarios=comparison.mode==='scenarios',quote=v=>/[",\n]/.test(String(v))?`"${String(v).replaceAll('"','""')}"`:v;
+    const rows=[['type','model',scenarios?'scenario':'information','metric','mean','ci_low','ci_high','replications']];
+    for(const [type,values] of [['outcome',comparison.cells],[scenarios?'scenario_minus_reference':'informed_minus_unaided',comparison.effects]])for(const row of values)for(const [metric,value] of Object.entries(row.metrics))rows.push([type,row.model,scenarios?row.scenario:row.information,metric,value.mean,value.low,value.high,value.replications]);
+    download(rows.map(r=>r.map(v=>quote(v??'')).join(',')).join('\n'),'panda-matched-comparison.csv','text/csv');
   }
   function renderStudy(){
     const occupancy=Number(el('study-occupancy').value);
@@ -191,9 +233,11 @@
     }
   };
   async function initializeUI(){
-    const r=await fetch('platform-views.html');if(!r.ok)throw Error('Platform views could not be loaded');document.querySelector('main').insertAdjacentHTML('beforeend',await r.text());
+    const r=await fetch('platform-views.html',{cache:'no-cache'});if(!r.ok)throw Error('Platform views could not be loaded');document.querySelector('main').insertAdjacentHTML('beforeend',await r.text());
     document.querySelector('.platform-nav').addEventListener('click',event=>{const button=event.target.closest('[data-page]');if(button)showPage(button.dataset.page);});
-    el('compare-start').addEventListener('click',startComparison);el('cancel-compute').addEventListener('click',()=>{if(engine)engine.cancel();});
+    el('compare-start').addEventListener('click',startComparison);
+    el('scenario-dimension').innerHTML=Object.entries(dimensions).map(([key,d])=>`<option value="${key}">${escape(d.label)}</option>`).join('');
+    el('scenario-dimension').addEventListener('change',renderScenarioValues);el('compare-mode').addEventListener('change',updateCompareMode);renderScenarioValues();updateCompareMode();el('cancel-compute').addEventListener('click',()=>{if(engine)engine.cancel();});
     el('comparison-json').addEventListener('click',()=>download(comparison,'panda-matched-comparison.json'));el('comparison-csv').addEventListener('click',comparisonCSV);
     el('benchmark-start').addEventListener('click',benchmark);el('benchmark-download').addEventListener('click',()=>download(measurement,'panda-platform-performance.json'));
     el('study-occupancy').addEventListener('change',renderStudy);study=await json('study-results.json');renderStudy();showPage('simulate');

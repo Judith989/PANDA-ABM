@@ -71,10 +71,14 @@ def validate_pedestrian_network(raw):
             # Explicit own-bay egress is allowed; road crossing connectors are not.
             from panda_abm.environment.pedestrian_geometry import segment_hits_polygon
             own=bay_polygon(s)
-            from panda_abm.environment.pedestrian_geometry import inside
+            from panda_abm.environment.pedestrian_geometry import inside,point_segment
+            # An on-street bay may step across its own parking lane to the curb (<=3 m).
+            curb=item.get('source')=='curb_step_parking_lane'
             for i in range(1,max(2,math.ceil(math.dist(a,b)/.1))):
                 t=i/max(2,math.ceil(math.dist(a,b)/.1));p=[a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1])]
-                if not inside(p,own) and road.hits(p,p):raise ValueError('Bay connector crosses a road')
+                if not inside(p,own) and road.hits(p,p):
+                    if curb and min(point_segment(p,u,v) for u,v in zip(own,own[1:]+own[:1]))<=3.:continue
+                    raise ValueError('Bay connector crosses a road')
     for did,n in dest.items():
         if n is None:continue
         if n not in nodes:raise ValueError('Unknown pedestrian destination node')
