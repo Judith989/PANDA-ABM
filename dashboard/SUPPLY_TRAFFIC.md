@@ -44,7 +44,9 @@ Every jam clears. The model lets a held vehicle through, records it in the run's
 | The front of a queue held for 90 s by anything other than a red signal | after 90 s; the queue behind follows | `stall_limit` (with what was holding it) |
 | A car waiting 90 s to enter or cross a junction while other traffic keeps taking the space | after 90 s | `stall_limit` |
 
-A released vehicle may overlap footprints, yields and queue holds for 15 s. Red signals are always obeyed.
+A vehicle released from a footprint or circular wait may pass through other vehicles for 15 s, and its release lasts until it is clear of them (at most 30 s more), so a release never leaves two vehicles stacked together. Behind a vehicle that is moving in the same lane it still keeps its following gap. A stall-limit release gives priority over yields and queue holds but keeps full clearance and never drives into the vehicle ahead. A vehicle within 0.5 m of a road and aligned with it occupies that road's lane. Red signals are always obeyed.
+
+The 3D view never draws two moving vehicles on top of each other. When the model briefly places vehicles inside each other — during a release, or while a vehicle waits beside a bay — the display draws the vehicle behind a short distance back along its own heading with a small bumper gap. This affects drawing only; recorded positions, traffic delay, jams and all outcomes are unchanged.
 
 Each jam records:
 - its location, start, end and duration;

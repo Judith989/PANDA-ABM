@@ -41,6 +41,7 @@ class AisleTraffic:
     footprint_wait_limit_s = 30.
     stall_limit_s = 90.
     deadlock_pass_s = 15.
+    deadlock_clear_limit_s = 30.
     FOOTPRINT_REASONS = ('vehicle_clearance', 'occupied_bay', 'building_clearance')
     QUEUE_REASONS = ('following_vehicle', 'downstream_queue')
 
@@ -78,6 +79,8 @@ class AisleTraffic:
     def begin_tick(self):
         active = sorted((a for a in road_agents(self.model) if a.state in DRIVING), key=lambda a:a.driver_id)
         self.budgets = {}
+        self.following_limits = {}
+        self.following_leaders = {}
         poses = {a.driver_id: ((a.x_m, a.y_m), heading(a)) for a in active}
         desired = {}
         straight_ranges = {}
@@ -123,6 +126,8 @@ class AisleTraffic:
                 if distance <= self.model.perception_radius_m:
                     a.traffic_ahead,a.traffic_gap_m = driver,max(0.,distance-self.vehicle_length_m)
                 limit = max(0.,distance-self.vehicle_length_m-self.minimum_gap_m)
+                self.following_limits[a.driver_id] = limit
+                self.following_leaders[a.driver_id] = driver
                 if limit < self.budgets[a.driver_id]:
                     self.budgets[a.driver_id] = limit
                     a.traffic_reason,a.traffic_blocker = 'following_vehicle',driver
@@ -277,7 +282,14 @@ class AisleTraffic:
                           if self.budgets[a.driver_id] <= 1e-6 and desired[a.driver_id] > 1e-6 else 0.
                           for a in active}
         passes = getattr(self, 'deadlock_passes', {})
-        self.deadlock_passes = {k: v for k, v in passes.items() if v[0] > now and k in self.stalled_s}
+        # A pass ends only once the released vehicle is clear of the obstacles it
+        # passed through, so a release never leaves two bodies stacked together.
+        from panda_abm.core.bay_clearance import overlaps_partners
+        agents_by_id = {a.driver_id: a for a in active}
+        # Bounded: a release that cannot get clear within deadlock_clear_limit_s ends anyway.
+        self.deadlock_passes = {k: v for k, v in passes.items() if k in self.stalled_s
+                                and (v[0] > now or ('*' not in v[1] and now < v[0]+self.deadlock_clear_limit_s
+                                                     and overlaps_partners(agents_by_id[k], v[1])))}
         waiting = {a.driver_id: a.traffic_blocker for a in active
                    if self.stalled_s[a.driver_id] >= self.deadlock_after_s}
         for start in sorted(waiting):
@@ -328,9 +340,18 @@ class AisleTraffic:
             a = by_id[driver]
             # Footprint clearance is waived for the pass; signals are not. A stall-limit
             # pass ('*') also overrides yielding and queue holds.
-            waived = '*' in partners and a.traffic_reason not in (None, 'red_signal')
-            if (waived or a.traffic_blocker in partners or a.traffic_reason in self.FOOTPRINT_REASONS) and self.budgets[driver] < desired[driver]:
-                self.budgets[driver] = desired[driver]
+            waived = '*' in partners and a.traffic_reason not in (None, 'red_signal', 'following_vehicle')
+            # A released vehicle still inside another must be able to drive out: holds
+            # caused by the vehicle it overlaps (queue, yield or clearance) do not apply.
+            stuck_inside = ('*' not in partners and a.traffic_reason not in (None, 'red_signal', 'pedestrian_crossing')
+                            and overlaps_partners(a, partners))
+            if (waived or stuck_inside or a.traffic_blocker in partners or a.traffic_reason in self.FOOTPRINT_REASONS) and self.budgets[driver] < desired[driver]:
+                # Releases resolve deadlocks, not queues: behind a vehicle that is moving in
+                # the same lane, a released vehicle keeps its gap; the gap opens as the
+                # leader drives on. Behind a stopped vehicle it may pass as before.
+                leader = self.following_leaders.get(driver)
+                leader_moving = leader is not None and (self.budgets.get(leader, 0.) > 1e-6 or leader in self.deadlock_passes)
+                self.budgets[driver] = min(desired[driver], self.following_limits[driver]) if leader_moving else desired[driver]
                 a.traffic_reason, a.traffic_blocker = 'deadlock_release', None
 
     def distance_budget(self, agent, dt):

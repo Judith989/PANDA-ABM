@@ -55,7 +55,7 @@ class Facility:
         return self.walking_network.route(space.space_id,attributes.walmart_door_id) if self.walking_network is not None else None
 
 
-    @property
+    @cached_property
     def space_by_id(self) -> dict[str, ParkingSpace]:
         return {space.space_id: space for space in self.spaces}
 

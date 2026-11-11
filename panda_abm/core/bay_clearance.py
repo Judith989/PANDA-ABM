@@ -86,9 +86,13 @@ def parking_clear(agent):
         if overlaps(target,shape(t,*(dimensions(owner) if owner else (5.45,2.02)))):return False
     return True
 
+LANE_SNAP_M=.5
+
 def display_position(model,point,u):
     nav=model.navigation
-    # Match Cesium's right-hand display offset, only on non-bay road edges.
+    # Match Cesium's right-hand display offset, only on non-bay road edges. A vehicle
+    # within LANE_SNAP_M of an aligned road (e.g. just leaving an access connector) is
+    # in that road's lane; otherwise it would straddle both directions of travel.
     from panda_abm.environment.pedestrian_geometry import point_segment
     cells=getattr(model,'_clearance_road_cells',None)
     if cells is None:
@@ -96,13 +100,37 @@ def display_position(model,point,u):
         for a,b in nav._edges:
             if a in stalls or b in stalls:continue
             p,q=nav.positions[a],nav.positions[b]
-            for x in range(math.floor(min(p[0],q[0])/10),math.floor(max(p[0],q[0])/10)+1):
-                for y in range(math.floor(min(p[1],q[1])/10),math.floor(max(p[1],q[1])/10)+1):cells.setdefault((x,y),[]).append((a,b))
+            for x in range(math.floor((min(p[0],q[0])-LANE_SNAP_M)/10),math.floor((max(p[0],q[0])+LANE_SNAP_M)/10)+1):
+                for y in range(math.floor((min(p[1],q[1])-LANE_SNAP_M)/10),math.floor((max(p[1],q[1])+LANE_SNAP_M)/10)+1):cells.setdefault((x,y),[]).append((a,b))
         model._clearance_road_cells=cells
     for a,b in cells.get((math.floor(point[0]/10),math.floor(point[1]/10)),()):
         p,q=nav.positions[a],nav.positions[b];length=math.dist(p,q)
-        if length and point_segment(point,p,q)<1e-4 and abs((q[0]-p[0])*u[0]+(q[1]-p[1])*u[1])/length>.99:return (point[0]+u[1]*1.2,point[1]-u[0]*1.2)
+        if length and point_segment(point,p,q)<LANE_SNAP_M and abs((q[0]-p[0])*u[0]+(q[1]-p[1])*u[1])/length>.99:return (point[0]+u[1]*1.2,point[1]-u[0]*1.2)
     return point
+
+def overlaps_partners(agent,partners):
+    """True while the vehicle's footprint still overlaps another vehicle or a parked car in ``partners``."""
+    from panda_abm.core.traffic import heading
+    from panda_abm.core.urban_traffic import road_agents
+    model=agent.model;ids={p for p in partners if p!='*'}
+    u=getattr(agent,'vehicle_heading',None) or heading(agent)
+    if math.hypot(*u)<.1:return False
+    l,w=dimensions(agent);mine=rectangle(display_position(model,(agent.x_m,agent.y_m),u),u,l+.1,w+.1)
+    geometry=(model.facility.aisle_network or {}).get('bay_geometry',{})
+    for other in road_agents(model):
+        if other is agent or other.state.value not in ('searching','targeting','exiting'):continue
+        if math.dist((other.x_m,other.y_m),(agent.x_m,agent.y_m))>8:continue
+        v=getattr(other,'vehicle_heading',None) or heading(other)
+        if math.hypot(*v)<.1:continue
+        ol,ow=dimensions(other)
+        if overlaps(mine,rectangle(display_position(model,(other.x_m,other.y_m),v),v,ol+.1,ow+.1)):return True
+    for sid in ids:
+        s=model.facility.space_by_id.get(sid) if hasattr(model.facility,'space_by_id') else None
+        if s is None or not model.space_states[sid].occupied:continue
+        g=geometry.get(sid,{});angle=math.radians(g.get('heading_deg',0))
+        if g.get('heading_reference')=='clockwise_from_north':angle=math.pi/2-angle
+        if overlaps(mine,rectangle((s.x_m,s.y_m),(math.cos(angle),math.sin(angle)),g.get('length_m',4.9),g.get('width_m',2.06))):return True
+    return False
 
 def limit_motion(agent,direction,distance,origin=None,static_only=False):
     """Check a sampled swept vehicle footprint against actual occupied vehicles."""
@@ -112,8 +140,11 @@ def limit_motion(agent,direction,distance,origin=None,static_only=False):
     if not getattr(model,'traffic',None):return distance
     geometry=(model.facility.aisle_network or {}).get('bay_geometry',{})
     blockers=[];point=origin if origin is not None else (agent.x_m,agent.y_m);own=getattr(agent,'departure_space_id',None)
-    # After a recorded deadlock release the vehicle may briefly overlap footprints.
-    if not static_only and agent.driver_id in getattr(model.traffic,'deadlock_passes',{}):return distance
+    # A footprint or circular-wait release lets the vehicle pass through until it is
+    # clear. A stall-limit release ('*') grants priority only: clearance still applies.
+    release=None if static_only else getattr(model.traffic,'deadlock_passes',{}).get(agent.driver_id)
+    if release is not None and '*' not in release[1]:return distance
+    waived=frozenset()
     # Occupied bays include background cars, which are not driving agents.
     cells=getattr(model,'_clearance_bay_cells',None)
     if cells is None:
@@ -125,7 +156,7 @@ def limit_motion(agent,direction,distance,origin=None,static_only=False):
         for y in range(math.floor((point[1]-radius)/10),math.floor((point[1]+radius)/10)+1):near.extend(cells.get((x,y),()))
     for sid in near:
         state=model.space_states[sid]
-        if not state.occupied or sid==own:continue
+        if not state.occupied or sid==own or sid in waived:continue
         s=model.facility.space_by_id[sid]
         if math.dist(point,(s.x_m,s.y_m))>distance+10:continue
         g=geometry.get(sid,{});angle=math.radians(g.get('heading_deg',0))
@@ -136,7 +167,7 @@ def limit_motion(agent,direction,distance,origin=None,static_only=False):
         l,w=min(l,g.get('length_m',l)),min(w,g.get('width_m',w))
         blockers.append((rectangle((s.x_m,s.y_m),(math.cos(angle),math.sin(angle)),l+.1,w+.1),'occupied_bay',sid))
     for other in ([] if static_only else road_agents(model)):
-        if other is agent or other.state not in (DriverState.SEARCHING,DriverState.TARGETING,DriverState.EXITING):continue
+        if other is agent or other.state not in (DriverState.SEARCHING,DriverState.TARGETING,DriverState.EXITING) or other.driver_id in waived:continue
         if math.dist(point,(other.x_m,other.y_m))>distance+10:continue
         from panda_abm.core.traffic import heading
         # A stopped car has not already rotated to its next route leg. Using its
@@ -148,22 +179,40 @@ def limit_motion(agent,direction,distance,origin=None,static_only=False):
         l,w=dimensions(other);pos=display_position(model,(other.x_m,other.y_m),u)
         blockers.append((rectangle(pos,u,l+.1,w+.1),'vehicle_clearance',other.driver_id))
     buildings=(model.facility.aisle_network or {}).get('building_footprints_m',{})
+    boxes=getattr(model,'_clearance_building_boxes',None)
+    if boxes is None:
+        boxes=model._clearance_building_boxes={key:(min(p[0] for p in poly),min(p[1] for p in poly),max(p[0] for p in poly),max(p[1] for p in poly)) for key,poly in buildings.items()}
     nearby_buildings=[]
     for key,poly in buildings.items():
-        if min(p[0] for p in poly)-10-distance<=point[0]<=max(p[0] for p in poly)+10+distance and min(p[1] for p in poly)-10-distance<=point[1]<=max(p[1] for p in poly)+10+distance:nearby_buildings.append((key,poly))
+        if key in waived:continue
+        x0,y0,x1,y1=boxes[key]
+        if x0-10-distance<=point[0]<=x1+10+distance and y0-10-distance<=point[1]<=y1+10+distance:nearby_buildings.append((key,poly))
     if not blockers and not nearby_buildings:return distance
-    l,w=dimensions(agent);steps=max(1,math.ceil(distance/.2));last=0.
+    l,w=dimensions(agent);steps=max(1,math.ceil(distance/.2))
+    # Exact bounding-box pre-filter: two shapes can only touch if their boxes
+    # overlap, so only those obstacles reach the detailed tests, in the same order.
+    eps=1e-6
+    def box(poly):return (min(p[0] for p in poly)-eps,min(p[1] for p in poly)-eps,max(p[0] for p in poly)+eps,max(p[1] for p in poly)+eps)
+    def meet(a,b):return a[0]<=b[2] and b[0]<=a[2] and a[1]<=b[3] and b[1]<=a[3]
+    shapes=[]
     for i in range(steps+1):
         d=distance*i/steps;p=(point[0]+direction[0]*d,point[1]+direction[1]*d)
-        shape=rectangle(display_position(model,p,direction),direction,l+.1,w+.1)
-        from panda_abm.environment.pedestrian_geometry import segment_hits_polygon,inside
-        for key,poly in nearby_buildings:
+        shape=rectangle(display_position(model,p,direction),direction,l+.1,w+.1);shapes.append((d,shape,box(shape)))
+    sweep=(min(b[0] for _,_,b in shapes),min(b[1] for _,_,b in shapes),max(b[2] for _,_,b in shapes),max(b[3] for _,_,b in shapes))
+    nearby_buildings=[(key,poly,box(poly)) for key,poly in nearby_buildings if meet(box(poly),sweep)]
+    blockers=[(obstacle,cause,key,box(obstacle)) for obstacle,cause,key in blockers if meet(box(obstacle),sweep)]
+    if not blockers and not nearby_buildings:return distance
+    from panda_abm.environment.pedestrian_geometry import segment_hits_polygon,inside
+    last=0.
+    for d,shape,shape_box in shapes:
+        for key,poly,poly_box in nearby_buildings:
+            if not meet(shape_box,poly_box):continue
             if any(segment_hits_polygon(a,b,poly) for a,b in zip(shape,shape[1:]+shape[:1])) or any(inside(q,shape) for q in poly):
                 agent.traffic_reason='building_clearance';agent.traffic_blocker=key
                 agent.clearance_blocks=getattr(agent,'clearance_blocks',0)+1
                 return last
-        for obstacle,cause,key in blockers:
-            if overlaps(shape,obstacle):
+        for obstacle,cause,key,obstacle_box in blockers:
+            if meet(shape_box,obstacle_box) and overlaps(shape,obstacle):
                 agent.traffic_reason=cause;agent.traffic_blocker=key
                 agent.clearance_blocks=getattr(agent,'clearance_blocks',0)+1
                 return last

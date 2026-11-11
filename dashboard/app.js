@@ -477,7 +477,7 @@ function bringMapIntoView(){if($('follow-driver').checked)document.querySelector
 function render() {
   if(state.editingOccupancy){renderOccupancyDraft();return;}
   if(!state.run)return;
-  const t=state.time,run=state.run,telemetry=telemetryAt(t),driverSlots=new Set();
+  const t=state.time,run=state.run,telemetry=telemetryAt(t),driverSlots=new Set(),moving=[];
   for(const track of run.tracks) {
     const p=sample(track,t),e=state.drivers.get(track.id);
     const parkedStage=['parked','walking_to_destination','at_destination','returning_to_vehicle'].includes(p.state);
@@ -488,6 +488,8 @@ function render() {
       const direction=Math.hypot(...p.direction)>1e-8?p.direction:[-reported[1],reported[0]];
       const offset=run.settings.traffic_enabled&&!walking?window.PandaMotion.laneOffset([p.x,p.y],direction,state.roadEdges??[]):[0,0];
       e.position=local(p.x+offset[0],p.y+offset[1],walking?1:.06);e.point.show=false;e.model.show=true;
+      const norm=Math.hypot(...direction);
+      if(!walking&&norm>1e-8)moving.push({id:track.id,x:p.x+offset[0],y:p.y+offset[1],direction:[direction[0]/norm,direction[1]/norm],type:track.vehicle_type,entity:e});
       e.point.color=C.Color.fromCssColorString(walking?'#a77b27':'#176ba4');
       if(Math.hypot(...direction)>1e-8)e.orientation=C.Transforms.headingPitchRollQuaternion(local(p.x,p.y,.06),new C.HeadingPitchRoll(-Math.atan2(direction[1],direction[0]),0,0));
       if(p.state==='parked'){const bay=state.slotEntities.get(p.space)?.slot;if(bay)e.orientation=C.Transforms.headingPitchRollQuaternion(local(p.x,p.y,.06),new C.HeadingPitchRoll(-slotAngle(bay),0,0));}
@@ -503,6 +505,8 @@ function render() {
     const parked=state.parkedCars.get(track.id),slot=state.slotEntities.get(p.space);
     if(parked){parked.show=Boolean(slot&&parkedStage);if(parked.show)driverSlots.add(slot.slot.id);if(parked.show){const fit=bayFit(slot.slot);parked.position=local(fit.x,fit.y,.06);parked.model.scale=parkedScale(track.vehicle_type,slot.slot);parked.orientation=C.Transforms.headingPitchRollQuaternion(local(slot.slot.local_x_m,slot.slot.local_y_m,.06),new C.HeadingPitchRoll(-slotAngle(slot.slot),0,0));}}
   }
+  // Draw overlapping vehicle bodies apart; display only, the simulation state is unchanged.
+  if(moving.length>1){const shifted=window.PandaMotion.separate(moving);for(const v of moving){const q=shifted.get(v.id);if(q)v.entity.position=local(q[0],q[1],.06);}}
   updateCameraFollow();
   if(Math.floor(t)!==appliedTime) {
     appliedTime=Math.floor(t);

@@ -187,7 +187,12 @@ class AisleNetwork:
             cache.move_to_end(key)
             return cache[key]
         queue=[];costs={};state_paths={};best={};paths={}
-        stalls=set(self.space_nodes.values())
+        # Edges are only added while the network is built, so these are fixed per network.
+        stalls=getattr(self,'_stall_nodes',None)
+        if stalls is None:stalls=self._stall_nodes=set(self.space_nodes.values())
+        degrees=getattr(self,'_road_degree',None)
+        if degrees is None:degrees=self._road_degree={}
+        restricted=getattr(self,'restricted_turns',set())
         for n,cost,foot in self._anchors(position):
             previous=-1
             if heading is not None and n not in stalls:
@@ -205,10 +210,11 @@ class AisleNetwork:
             cost,previous,node=heapq.heappop(queue);state=(previous,node)
             if cost>costs[state]+1e-9:continue
             if cost<best.get(node,float('inf')):best[node]=cost;paths[node]=state_paths[state]
+            road_degree=degrees.get(node)
+            if road_degree is None:road_degree=degrees[node]=sum(n not in stalls for n in self.graph[node])
+            turnaround=heading is not None and node not in stalls and road_degree<=1
             for neighbor,edge in self.graph[node].items():
-                road_degree=sum(n not in stalls for n in self.graph[node])
-                turnaround=heading is not None and node not in stalls and road_degree<=1
-                if (neighbor==previous and not turnaround) or (previous,node,neighbor) in getattr(self,'restricted_turns',set()):continue
+                if (neighbor==previous and not turnaround) or (previous,node,neighbor) in restricted:continue
                 if heading is not None and previous>=0 and not turnaround and edge['weight']>=1e-3:
                     incoming=tuple(self.positions[node][i]-self.positions[previous][i] for i in range(2))
                     outgoing=tuple(self.positions[neighbor][i]-self.positions[node][i] for i in range(2))
